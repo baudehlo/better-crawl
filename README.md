@@ -1,10 +1,14 @@
 # better-crawl
 
-**AI writes your crawler once. After that, it runs for free.**
+[![CI](https://github.com/baudehlo/better-crawl/actions/workflows/ci.yml/badge.svg)](https://github.com/baudehlo/better-crawl/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![node](https://img.shields.io/badge/node-%3E%3D20.19-brightgreen.svg)](package.json)
 
-Point better-crawl at a URL with a natural-language description and your [zod](https://zod.dev) schemas. An LLM explores the site, writes a standalone crawler program (cheerio for static sites, Playwright when JavaScript is required — it decides), **self-tests it against the live site**, and hands you back a JSON *artifact*. Replaying the artifact costs zero LLM tokens. When the site eventually changes and the crawler breaks, `heal` sends the failure back to the model, patches the crawler, re-tests, and returns the updated artifact.
+AI writes your crawler once. After that, it runs for free.
 
-Unlike LLM-per-crawl tools, you pay for intelligence only twice: once at generation, and once per site redesign.
+Point better-crawl at a URL with a plain-language description of what you want and your [zod](https://zod.dev) schemas. An LLM explores the site, writes a standalone crawler program (cheerio when the data is in the raw HTML, Playwright when JavaScript is required; it works out which), tests that crawler against the live site, and hands you back a JSON artifact. Replaying the artifact costs zero LLM tokens. When the site eventually changes and the crawler breaks, `heal` sends the failure report back to the model, patches the crawler, re-tests, and returns the updated artifact.
+
+Tools that put an LLM in the loop for every page pay for intelligence on every crawl. This one pays twice: at generation, and again when the site gets redesigned.
 
 ```
 generate:  URL + instructions + zod schemas ──▶ scout ──▶ codegen ──▶ self-test ⟲ repair ──▶ artifact.json
@@ -16,11 +20,11 @@ heal:      broken artifact + failure report ──▶ patched artifact (small LL
 
 ```bash
 npm install better-crawl zod ai @ai-sdk/anthropic
-# playwright is optional — only needed for JS-rendered sites and for generation
+# playwright is optional; needed for JS-rendered sites and for generation
 npm install playwright && npx playwright install chromium
 ```
 
-Requires Node ≥ 20.19. Bring any [Vercel AI SDK](https://ai-sdk.dev) model; the examples use Claude.
+Requires Node 20.19 or later. Any [Vercel AI SDK](https://ai-sdk.dev) model works; the examples use Claude.
 
 ## Generate a crawler
 
@@ -51,7 +55,7 @@ await writeFile('crawler.json', artifact.serialize());
 console.log(`self-test extracted ${items.product.length} products`, report.itemCounts);
 ```
 
-## Replay it — no LLM involved
+## Replay it, no LLM involved
 
 ```ts
 import { runCrawler, loadArtifact } from 'better-crawl';
@@ -67,7 +71,7 @@ const result = await run;
 if (!result.report.ok) console.error(result.report);
 ```
 
-Passing `schemas` on replay gives you strict zod validation; without them, items are checked against the JSON Schema copies embedded in the artifact.
+Passing `schemas` on replay gives you strict zod validation. If you leave them out, items are checked against the JSON Schema copies embedded in the artifact instead.
 
 ## Heal it when the site changes
 
@@ -83,7 +87,7 @@ run.on('artifact-updated', async (e) => {
 const result = await run; // result.healed tells you whether a repair happened
 ```
 
-Healing is tiered: a **selector-only patch** first (the usual case after a reskin — a few hundred tokens, the code is untouched), then a full code regeneration from the old artifact plus the failure report, and — only if you ask with `heal: 'full'` — a complete re-scout.
+Healing tries the cheap fix first: a selector-only patch, which handles the usual reskin for a few hundred tokens without touching the code. If that doesn't pass, it regenerates the code from the old artifact plus the failure report. A complete re-scout only happens if you ask for it with `heal: 'full'`.
 
 ## CLI
 
@@ -99,28 +103,29 @@ npx better-crawl run crawler.json --out items.ndjson        # zero-token replay
 npx better-crawl run crawler.json --heal --schema ./schemas.mjs   # repair on drift
 ```
 
-Items stream to stdout (or `--out`) as NDJSON; progress goes to stderr; the exit code is non-zero when the run's assertions fail. Credentials: `--input username=alice --input-env password=SHOP_PASSWORD`.
+Items stream to stdout (or `--out`) as NDJSON, progress goes to stderr, and the exit code is non-zero when the run's assertions fail. For credentials: `--input username=alice --input-env password=SHOP_PASSWORD`.
 
-## What an artifact is — and a warning
+## Artifacts
 
-An artifact is a single JSON file: a **manifest** (engine, entry URL, named inputs, a *named selector table*, JSON Schema copies of your schemas, success assertions, generation stats) plus the **generated code** — a plain ES module `export default async function crawl(ctx) {...}`.
+An artifact is a single JSON file: a manifest (engine, entry URL, named inputs, a named selector table, JSON Schema copies of your schemas, success assertions, generation stats) plus the generated code, which is a plain ES module of the form `export default async function crawl(ctx) {...}`.
 
-Two properties matter:
+All CSS lives in the manifest, never in the code. Code refers to selectors by name (`ctx.sel('nextPage')`), which is what makes the cheap selector-only heal possible in the first place.
 
-- **All CSS lives in the manifest, never in the code.** Code references selectors by name (`ctx.sel('nextPage')`). That's what makes cheap selector-only healing possible.
-- **⚠️ Artifacts are code.** Running an artifact executes its embedded JavaScript with the same privileges as your process. better-crawl generates and self-tests them, but it does not sandbox them. Treat an artifact like a dependency you vendored: review it before running it in sensitive environments, and don't run artifacts from sources you don't trust.
+A warning worth reading twice: artifacts are code. Running one executes its embedded JavaScript with the same privileges as your process. better-crawl generates and self-tests artifacts, but it does not sandbox them. Treat an artifact like a dependency you vendored — review it before running it somewhere sensitive, and don't run artifacts from sources you don't trust.
 
 ## Credentials
 
-Artifacts declare named inputs (`username`, `password`, ...). Values are supplied at generate/run time and injected via `ctx.input(name)` — they are **never** embedded in the artifact, and secret values are scrubbed from everything sent to the LLM.
+Artifacts declare named inputs (`username`, `password`, and so on). Values are supplied at generate/run time and injected via `ctx.input(name)`. They are never embedded in the artifact, and secret values are scrubbed from everything sent to the LLM.
 
 ## Being a good citizen
 
-By default better-crawl fetches `robots.txt` per origin and refuses disallowed URLs, honors `Crawl-delay`, waits 500ms between requests, caps runs at 100 pages and 10 minutes, and identifies itself as `better-crawl/<version> (+https://github.com/baudehlo/better-crawl)`. All of it is configurable (`limits`, `userAgent`, `ignoreRobots`) — what you do with the knobs is on you. Also: generation performs up to `1 + maxRepairAttempts` real crawls of the target site while self-testing. Develop against a staging copy or local fixture when you can.
+By default better-crawl fetches `robots.txt` per origin and refuses disallowed URLs, honors `Crawl-delay`, waits 500ms between requests, caps runs at 100 pages and 10 minutes, and identifies itself as `better-crawl/<version> (+https://github.com/baudehlo/better-crawl)`. All of this is configurable through `limits`, `userAgent`, and `ignoreRobots`; what you do with the knobs is on you.
+
+Note that generation performs up to `1 + maxRepairAttempts` real crawls of the target site while self-testing. Develop against a staging copy or a local fixture when you can.
 
 ## Events
 
-Handles returned by `generateCrawler`/`runCrawler` are promises **and** async-iterables **and** event emitters:
+Handles returned by `generateCrawler`/`runCrawler` are promises, async-iterables, and event emitters all at once:
 
 | Event | Payload |
 |---|---|
@@ -134,9 +139,9 @@ Handles returned by `generateCrawler`/`runCrawler` are promises **and** async-it
 
 ## How generation works
 
-1. **Scout** — an agent loop drives a real browser: condensed page reads (links + text, never raw HTML or the accessibility tree), selector verification, automatic listing-pattern detection, pagination exhaustion, and a **no-JS probe** that decides cheerio vs playwright. Its exit tool is gated: reports with unverified selectors, invalid sample items, or an unproven cheerio claim are rejected with instructions, and the model corrects itself in-run.
-2. **Codegen** — one structured-output call produces the code + manifest. The library overrides what it verified itself: the engine choice, selector samples, and assertion floors.
-3. **Self-test** — static lint, then a full live run: every item validated per-schema, assertions checked (`minItems`, field coverage, URLs reached). Failures are compacted into a digest and sent back for repair (default 3 attempts). **You only ever receive an artifact that has passed.**
+1. **Scout.** An agent loop drives a real browser: condensed page reads (links + text, never raw HTML or the accessibility tree), selector verification, automatic listing-pattern detection, pagination exhaustion, and a no-JS probe that decides cheerio vs playwright. Its exit tool is gated. Reports with unverified selectors, invalid sample items, or an unproven cheerio claim get rejected with instructions, and the model corrects itself in-run.
+2. **Codegen.** One structured-output call produces the code and manifest. The library overrides anything it verified itself: the engine choice, selector samples, and assertion floors.
+3. **Self-test.** Static lint first, so obviously broken code never touches the site, then a full live run with every item validated per-schema and assertions checked (`minItems`, field coverage, URLs reached). Failures are compacted into a digest and sent back for repair, three attempts by default. You only ever receive an artifact that has passed.
 
 ## License
 
