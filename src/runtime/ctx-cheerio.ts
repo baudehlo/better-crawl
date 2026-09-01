@@ -1,6 +1,11 @@
 import * as cheerio from 'cheerio';
-import type { CtxBase, SharedRuntime } from './ctx-shared.js';
-import { CookieFetcher } from './cookie-fetch.js';
+import type { CtxBase, EngineRuntime } from './ctx-shared.js';
+import type { CookieFetchInit, CookieFetchResult } from './cookie-fetch.js';
+
+/** How the cheerio ctx gets pages — a CookieFetcher in-process, an RPC proxy in the sandbox. */
+export interface PageFetcher {
+  request(url: string, init?: CookieFetchInit): Promise<CookieFetchResult>;
+}
 
 export interface FetchedPage {
   $: cheerio.CheerioAPI;
@@ -21,8 +26,8 @@ export interface CheerioCtx extends CtxBase {
 }
 
 export function createCheerioCtx(
-  shared: SharedRuntime,
-  fetcher: CookieFetcher,
+  shared: EngineRuntime,
+  fetcher: PageFetcher,
 ): CheerioCtx {
   const toPage = (result: { url: string; status: number; body: string }): FetchedPage => {
     shared.recordVisit(result.url);

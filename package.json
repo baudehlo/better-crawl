@@ -1,6 +1,6 @@
 {
   "name": "better-crawl",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "AI generates a crawler once — a self-tested, replayable Playwright or cheerio program — then runs it for near-zero cost, healing it when the site changes.",
   "keywords": [
     "crawling",
@@ -44,6 +44,7 @@
     "build": "tsdown",
     "prepare": "tsdown",
     "typecheck": "tsc --noEmit",
+    "pretest": "tsdown",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage"

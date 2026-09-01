@@ -86,6 +86,15 @@ export interface CommonOptions {
   signal?: AbortSignal;
   /** Run the browser headed (debugging). Default true = headless. */
   headless?: boolean;
+  /**
+   * Artifact code runs SANDBOXED by default: a child process with a clean
+   * environment (no secrets) and Node's permission model (read-only fs limited
+   * to the code and node_modules, no child processes, no workers). Network,
+   * robots/budget gates, and validation stay in the parent. Pass true to run
+   * artifact code in-process instead — only do this if your environment cannot
+   * spawn the runner, and only for artifacts you trust like your own code.
+   */
+  noSandbox?: boolean;
 }
 
 export interface GenerateOptions extends CommonOptions {

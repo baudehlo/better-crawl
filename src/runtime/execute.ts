@@ -18,7 +18,7 @@ import { DEFAULT_USER_AGENT } from '../version.js';
 import { CookieFetcher } from './cookie-fetch.js';
 import { createCheerioCtx } from './ctx-cheerio.js';
 import { EarlyStop, SharedRuntime } from './ctx-shared.js';
-import { loadCrawlModule } from './load-module.js';
+import { loadCrawlModule, writeCrawlModule } from './load-module.js';
 import { Net } from './net.js';
 import { RobotsCache } from './robots.js';
 import { createValidator } from './validate.js';
@@ -37,6 +37,7 @@ export interface ExecuteOptions {
   screenshotDir?: string;
   pageEvents?: boolean;
   headless?: boolean;
+  noSandbox?: boolean;
   proxy?: ProxyOptions;
   headers?: Record<string, string>;
   retry?: RetryOptions;
@@ -86,7 +87,6 @@ export async function executeArtifact(
   };
   const timeoutMs = opts.limits?.timeoutMs ?? DEFAULT_LIMITS.timeoutMs;
 
-  const { fn } = await loadCrawlModule(artifact.code, opts.moduleDir);
   const validator = createValidator(opts.schemas, manifest.schemas);
 
   const timeoutCtl = new AbortController();
@@ -129,45 +129,79 @@ export async function executeArtifact(
   const startedAt = Date.now();
   let runtimeError: RunReport['runtimeError'];
   let failurePage: string | undefined;
-  let cleanup: (() => Promise<void>) | undefined;
-  let livePage: import('playwright').Page | undefined;
 
-  try {
-    let ctx: unknown;
-    if (manifest.engine === 'cheerio') {
-      ctx = createCheerioCtx(shared, new CookieFetcher(net, signal));
-    } else {
-      const { createPlaywrightSession } = await import('./ctx-playwright.js');
-      const session = await createPlaywrightSession(shared, {
-        userAgent,
-        headless: opts.headless ?? true,
-        screenshots: opts.screenshots ?? false,
-        ...(opts.screenshotDir !== undefined ? { screenshotDir: opts.screenshotDir } : {}),
-        ...(opts.proxy !== undefined ? { proxy: opts.proxy } : {}),
-        ...(opts.headers !== undefined ? { headers: opts.headers } : {}),
-        ...(opts.browser !== undefined ? { browser: opts.browser } : {}),
-        retry: net.retry,
-      });
-      ctx = session.ctx;
-      livePage = session.page;
-      cleanup = session.close;
+  if (!opts.noSandbox) {
+    // Default path: artifact code runs in a locked-down child process; this
+    // process keeps network, gates, validation, and the report.
+    try {
+      const moduleFile = await writeCrawlModule(artifact.code, opts.moduleDir);
+      const { runSandboxed } = await import('../sandbox/host.js');
+      const outcome = await runSandboxed(
+        artifact,
+        {
+          moduleFile,
+          inputs,
+          limits,
+          pageEvents: opts.pageEvents ?? false,
+          screenshots: opts.screenshots ?? false,
+          screenshotDir: opts.screenshotDir,
+          headless: opts.headless ?? true,
+          userAgent,
+          headers: opts.headers,
+          proxy: opts.proxy,
+          browser: opts.browser,
+          retry: net.retry,
+          signal,
+        },
+        { shared, fetcher: new CookieFetcher(net, signal), emitEvent },
+      );
+      runtimeError = outcome.runtimeError;
+      failurePage = outcome.failurePage;
+    } finally {
+      clearTimeout(timer);
     }
-    await fn(ctx);
-  } catch (err) {
-    if (!(err instanceof EarlyStop)) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      runtimeError = {
-        message: error.message,
-        stack: error.stack ?? '',
-        ...(error instanceof NoMatchError || error instanceof UnknownSelectorError
-          ? { failedSelector: error.selectorName }
-          : {}),
-      };
-      failurePage = await captureFailurePage(livePage, shared).catch(() => undefined);
+  } else {
+    const { fn } = await loadCrawlModule(artifact.code, opts.moduleDir);
+    let cleanup: (() => Promise<void>) | undefined;
+    let livePage: import('playwright').Page | undefined;
+
+    try {
+      let ctx: unknown;
+      if (manifest.engine === 'cheerio') {
+        ctx = createCheerioCtx(shared, new CookieFetcher(net, signal));
+      } else {
+        const { createPlaywrightSession } = await import('./ctx-playwright.js');
+        const session = await createPlaywrightSession(shared, {
+          userAgent,
+          headless: opts.headless ?? true,
+          screenshots: opts.screenshots ?? false,
+          ...(opts.screenshotDir !== undefined ? { screenshotDir: opts.screenshotDir } : {}),
+          ...(opts.proxy !== undefined ? { proxy: opts.proxy } : {}),
+          ...(opts.headers !== undefined ? { headers: opts.headers } : {}),
+          ...(opts.browser !== undefined ? { browser: opts.browser } : {}),
+          retry: net.retry,
+        });
+        ctx = session.ctx;
+        livePage = session.page;
+        cleanup = session.close;
+      }
+      await fn(ctx);
+    } catch (err) {
+      if (!(err instanceof EarlyStop)) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        runtimeError = {
+          message: error.message,
+          stack: error.stack ?? '',
+          ...(error instanceof NoMatchError || error instanceof UnknownSelectorError
+            ? { failedSelector: error.selectorName }
+            : {}),
+        };
+        failurePage = await captureFailurePage(livePage, shared).catch(() => undefined);
+      }
+    } finally {
+      clearTimeout(timer);
+      await cleanup?.().catch(() => undefined);
     }
-  } finally {
-    clearTimeout(timer);
-    await cleanup?.().catch(() => undefined);
   }
 
   const durationMs = Date.now() - startedAt;

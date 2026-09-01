@@ -111,7 +111,24 @@ An artifact is a single JSON file: a manifest (engine, entry URL, named inputs, 
 
 All CSS lives in the manifest, never in the code. Code refers to selectors by name (`ctx.sel('nextPage')`), which is what makes the cheap selector-only heal possible in the first place.
 
-A warning worth reading twice: artifacts are code. Running one executes its embedded JavaScript with the same privileges as your process. better-crawl generates and self-tests artifacts, but it does not sandbox them. Treat an artifact like a dependency you vendored — review it before running it somewhere sensitive, and don't run artifacts from sources you don't trust.
+Artifacts are code — running one executes its embedded JavaScript. By default that happens inside a sandbox (see below), so a hostile or buggy artifact can't read your filesystem, spawn processes, or see your environment. Still treat an artifact like a dependency you vendored: review it before running it somewhere sensitive.
+
+## Sandboxing
+
+Artifact code runs **sandboxed by default**, in every phase that executes it (self-test, replay, heal). The scout and your own code are unaffected — only the LLM-written crawler program is confined.
+
+The sandbox is a child process, not a JS-level jail (`vm` is not a security boundary and vm2 is dead): the runner is spawned with a **clean environment** — no API keys, no database URLs, nothing from `process.env` — under **Node's permission model**, which limits it to read-only access to the artifact's code and `node_modules`, and blocks child processes, workers, and native addons. Everything with authority stays in the parent and is reached over IPC:
+
+- **Network** — the cookie jar, proxy, and retry/Cloudflare logic run parent-side; the cheerio engine's child never opens a socket, it asks the parent to fetch.
+- **Gates** — robots.txt, the page budget, and the politeness delay are enforced in the parent, per navigation.
+- **Validation** — your zod schemas never enter the child; every emitted item crosses the boundary raw and is judged by the parent.
+- **Timeouts** — `limits.timeoutMs` becomes a hard kill instead of a cooperative signal, so a busy-looping artifact can't run forever.
+
+On the playwright engine the parent launches the browser server and the child connects to it over a websocket, so the child additionally holds a browser connection (and artifact-declared `inputs` like login credentials, which it needs to type into forms) — weaker than the cheerio case, but still no fs, no exec, no ambient secrets.
+
+Opting out: pass `noSandbox: true` (or `--no-sandbox` on the CLI) to run artifact code in-process. Do this only if your environment can't spawn the runner (the error will say so), and only for artifacts you trust like your own code. Spawn overhead is ~50ms per run.
+
+Node version note: the permission model ships behind `--experimental-permission` on Node 20/22 (you may see an experimental warning on stderr) and as stable `--permission` on Node 23+. The clean-environment and process-isolation properties apply on every supported version.
 
 ## Credentials
 

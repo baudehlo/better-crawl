@@ -30,6 +30,7 @@ COMMON OPTIONS
   --delay <ms>              Politeness delay between requests (default 500)
   --timeout <ms>            Wall-clock limit for a run (default 600000)
   --ignore-robots           Skip robots.txt checks
+  --no-sandbox              Run artifact code in-process instead of the sandboxed child
   --headed                  Run the browser with a visible window
   --screenshots <dir>       Save screenshots to a directory
   --quiet                   Suppress progress output on stderr
@@ -67,6 +68,7 @@ function parse(argv: string[]): CliFlags {
       delay: { type: 'string' },
       timeout: { type: 'string' },
       'ignore-robots': { type: 'boolean' },
+      'no-sandbox': { type: 'boolean' },
       headed: { type: 'boolean' },
       screenshots: { type: 'string' },
       quiet: { type: 'boolean' },
@@ -212,6 +214,7 @@ async function cmdGenerate(flags: CliFlags): Promise<number> {
     limits: collectLimits(flags),
     ignoreRobots: flags.values['ignore-robots'] === true,
     headless: flags.values['headed'] !== true,
+    ...(flags.values['no-sandbox'] === true ? { noSandbox: true } : {}),
     ...(typeof flags.values['screenshots'] === 'string'
       ? { screenshots: true, screenshotDir: flags.values['screenshots'] }
       : {}),
@@ -258,6 +261,7 @@ async function cmdRun(flags: CliFlags, forceHeal: boolean): Promise<number> {
     limits: collectLimits(flags),
     ignoreRobots: flags.values['ignore-robots'] === true,
     headless: flags.values['headed'] !== true,
+    ...(flags.values['no-sandbox'] === true ? { noSandbox: true } : {}),
     ...(typeof flags.values['screenshots'] === 'string'
       ? { screenshots: true, screenshotDir: flags.values['screenshots'] }
       : {}),

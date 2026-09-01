@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { Browser, Page, Response as PwResponse } from 'playwright';
 import { NoMatchError, PlaywrightMissingError } from '../errors.js';
 import type { BrowserOptions, ProxyOptions } from '../types.js';
-import type { CtxBase, SharedRuntime } from './ctx-shared.js';
+import type { CtxBase, EngineRuntime } from './ctx-shared.js';
 import {
   buildContextOptions,
   buildLaunchOptions,
@@ -41,6 +41,8 @@ export interface PlaywrightSessionOptions {
   screenshotDir?: string;
   /** Reuse an existing page (the scout does this); the session then won't own/close the browser. */
   existingPage?: Page;
+  /** Connect to an already-launched browser server instead of launching one (sandbox runner). */
+  connectWsEndpoint?: string;
   proxy?: ProxyOptions;
   headers?: Record<string, string>;
   browser?: BrowserOptions;
@@ -55,7 +57,7 @@ export interface PlaywrightSession {
 }
 
 export async function createPlaywrightSession(
-  shared: SharedRuntime,
+  shared: EngineRuntime,
   opts: PlaywrightSessionOptions,
 ): Promise<PlaywrightSession> {
   let page: Page;
@@ -70,9 +72,9 @@ export async function createPlaywrightSession(
     } catch {
       throw new PlaywrightMissingError();
     }
-    browser = await pw.chromium.launch(
-      buildLaunchOptions(opts.headless, opts.browser, opts.proxy),
-    );
+    browser = opts.connectWsEndpoint
+      ? await pw.chromium.connect(opts.connectWsEndpoint)
+      : await pw.chromium.launch(buildLaunchOptions(opts.headless, opts.browser, opts.proxy));
     const context = await browser.newContext(
       buildContextOptions(opts.userAgent, opts.headers, opts.proxy),
     );
@@ -213,7 +215,7 @@ async function gotoWithRetry(
   page: Page,
   url: string,
   retry: ResolvedRetry,
-  shared: SharedRuntime,
+  shared: EngineRuntime,
 ): Promise<void> {
   await withRetry<PwResponse | null>(() => page.goto(url, { waitUntil: 'domcontentloaded' }), {
     retry,

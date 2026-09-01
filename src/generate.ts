@@ -157,6 +157,7 @@ export async function runGeneration(
       screenshots: opts.screenshots ?? false,
       ...(opts.screenshotDir !== undefined ? { screenshotDir: opts.screenshotDir } : {}),
       ...(opts.pageEvents !== undefined ? { pageEvents: opts.pageEvents } : {}),
+      ...(opts.noSandbox !== undefined ? { noSandbox: opts.noSandbox } : {}),
       headless: opts.headless ?? true,
       ...(opts.proxy !== undefined ? { proxy: opts.proxy } : {}),
       ...(opts.headers !== undefined ? { headers: opts.headers } : {}),
