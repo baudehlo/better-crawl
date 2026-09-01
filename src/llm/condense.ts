@@ -31,8 +31,25 @@ export function formatCondensed(url: string, links: string, text: string): strin
  * Browser-side condensation. Annotation text nodes are prepended, read, then
  * removed again — the DOM must never be destructively modified (on React SPAs
  * removed elements are often the mount containers).
+ *
+ * A navigation can destroy the JS context mid-evaluate (meta refresh, a late
+ * error-page commit after a failed goto, JS-initiated redirects); wait for the
+ * new document and read that one instead of failing the read.
  */
 export async function condensePage(page: Page): Promise<string> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await condensePageOnce(page);
+    } catch (err) {
+      const destroyed =
+        err instanceof Error && /Execution context was destroyed/i.test(err.message);
+      if (!destroyed || attempt >= 2) throw err;
+      await page.waitForLoadState('domcontentloaded').catch(() => undefined);
+    }
+  }
+}
+
+async function condensePageOnce(page: Page): Promise<string> {
   const { url, links, text } = await page.evaluate(
     /* v8 ignore start -- runs inside Chromium, invisible to Node coverage; asserted via integration tests */
     ({ rootSelector }) => {
