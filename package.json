@@ -1,6 +1,6 @@
 {
   "name": "better-crawl",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "AI generates a crawler once — a self-tested, replayable Playwright or cheerio program — then runs it for near-zero cost, healing it when the site changes.",
   "keywords": [
     "crawling",
@@ -32,6 +32,8 @@
       "default": "./dist/index.mjs"
     }
   },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "bin": {
     "better-crawl": "./dist/cli.mjs"
   },
@@ -40,6 +42,7 @@
   ],
   "scripts": {
     "build": "tsdown",
+    "prepare": "tsdown",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
@@ -48,7 +51,8 @@
   "dependencies": {
     "ai": "^6.0.0",
     "cheerio": "^1.0.0",
-    "tough-cookie": "^5.0.0"
+    "tough-cookie": "^5.0.0",
+    "undici": "^8.10.1"
   },
   "peerDependencies": {
     "playwright": "^1.50.0",
