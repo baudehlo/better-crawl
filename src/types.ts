@@ -16,9 +16,52 @@ export interface Limits {
   maxItems?: number;
 }
 
+export interface ProxyOptions {
+  /** Proxy URL, e.g. "http://host:8080" (credentials may be embedded or passed separately). */
+  server: string;
+  username?: string;
+  password?: string;
+  /**
+   * Accept the proxy's TLS-intercepting certificates (residential proxies like
+   * Bright Data MITM HTTPS). Default false.
+   */
+  ignoreTlsErrors?: boolean;
+}
+
+export interface RetryOptions {
+  /** Retries after the first try for transient failures (network drops, 429/5xx). Default 2; 0 disables. */
+  attempts?: number;
+  /** Base backoff, doubled per retry. Default 1000ms. */
+  backoffMs?: number;
+  /** Backoff cap. Default 30_000ms. */
+  maxBackoffMs?: number;
+  /**
+   * Cloudflare challenge/block responses (403/503 with Cloudflare markers) get
+   * their own longer schedule — default 4 attempts, 5s base doubling to a 300s
+   * cap. Pass false to disable, or an object to tune. NOTE: these waits count
+   * against limits.timeoutMs (600s default); raise it for heavily-challenged sites.
+   */
+  cloudflare?: boolean | { attempts?: number; backoffMs?: number; maxBackoffMs?: number };
+}
+
+export interface BrowserOptions {
+  /** Launch this Chromium binary instead of playwright's bundled one (e.g. a system chromium in Docker). */
+  executablePath?: string;
+  /** Extra chromium launch args, e.g. ['--no-sandbox', '--disable-dev-shm-usage']. */
+  args?: string[];
+}
+
 export interface CommonOptions {
   /** Values for the inputs the artifact declares (username, password, ...). */
   inputs?: Record<string, string>;
+  /** Route all HTTP and browser traffic through a proxy. */
+  proxy?: ProxyOptions;
+  /** Extra headers sent with every plain fetch and browser request. */
+  headers?: Record<string, string>;
+  /** Transient-failure retry policy. Retries are ON by default (2 attempts); `{ attempts: 0 }` disables. */
+  retry?: RetryOptions;
+  /** Browser launch overrides (playwright engine). */
+  browser?: BrowserOptions;
   /** Emit screenshot events (playwright engine only). */
   screenshots?: boolean;
   /** When set, screenshots are written here and events carry `path` instead of `buffer`. */

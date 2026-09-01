@@ -6,12 +6,20 @@ import {
   RunTimeoutError,
   UnknownSelectorError,
 } from '../errors.js';
-import type { Limits, RunReport, Schemas } from '../types.js';
+import type {
+  BrowserOptions,
+  Limits,
+  ProxyOptions,
+  RetryOptions,
+  RunReport,
+  Schemas,
+} from '../types.js';
 import { DEFAULT_USER_AGENT } from '../version.js';
 import { CookieFetcher } from './cookie-fetch.js';
 import { createCheerioCtx } from './ctx-cheerio.js';
 import { EarlyStop, SharedRuntime } from './ctx-shared.js';
 import { loadCrawlModule } from './load-module.js';
+import { Net } from './net.js';
 import { RobotsCache } from './robots.js';
 import { createValidator } from './validate.js';
 
@@ -28,6 +36,10 @@ export interface ExecuteOptions {
   screenshots?: boolean;
   screenshotDir?: string;
   headless?: boolean;
+  proxy?: ProxyOptions;
+  headers?: Record<string, string>;
+  retry?: RetryOptions;
+  browser?: BrowserOptions;
 }
 
 export interface ExecuteOutcome {
@@ -85,10 +97,19 @@ export async function executeArtifact(
     ? AbortSignal.any([opts.signal, timeoutCtl.signal])
     : timeoutCtl.signal;
 
+  const net = new Net({
+    userAgent,
+    proxy: opts.proxy,
+    headers: opts.headers,
+    retry: opts.retry,
+    signal,
+    emitEvent,
+  });
+
   const robots = opts.ignoreRobots
     ? undefined
     : new RobotsCache(async (url) => {
-        const res = await fetch(url, { headers: { 'user-agent': userAgent }, signal });
+        const res = await net.fetch(url, { signal });
         return { status: res.status, body: await res.text() };
       }, userAgent);
 
@@ -112,7 +133,7 @@ export async function executeArtifact(
   try {
     let ctx: unknown;
     if (manifest.engine === 'cheerio') {
-      ctx = createCheerioCtx(shared, new CookieFetcher(userAgent, signal));
+      ctx = createCheerioCtx(shared, new CookieFetcher(net, signal));
     } else {
       const { createPlaywrightSession } = await import('./ctx-playwright.js');
       const session = await createPlaywrightSession(shared, {
@@ -120,6 +141,10 @@ export async function executeArtifact(
         headless: opts.headless ?? true,
         screenshots: opts.screenshots ?? false,
         ...(opts.screenshotDir !== undefined ? { screenshotDir: opts.screenshotDir } : {}),
+        ...(opts.proxy !== undefined ? { proxy: opts.proxy } : {}),
+        ...(opts.headers !== undefined ? { headers: opts.headers } : {}),
+        ...(opts.browser !== undefined ? { browser: opts.browser } : {}),
+        retry: net.retry,
       });
       ctx = session.ctx;
       livePage = session.page;

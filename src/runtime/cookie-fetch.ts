@@ -1,5 +1,6 @@
 import { CookieJar } from 'tough-cookie';
 import { BetterCrawlError } from '../errors.js';
+import { classifyResponse, type AttemptFailure, type Net } from './net.js';
 
 export interface CookieFetchInit {
   method?: string;
@@ -23,16 +24,31 @@ const MAX_REDIRECTS = 10;
  * Auto-redirecting fetch processes Set-Cookie inconsistently across the 302
  * chain of a typical form login; following each hop ourselves captures session
  * cookies reliably (and records the true final URL).
+ *
+ * Transient failures retry on the Net's schedule: network errors for any
+ * method, and retryable statuses (429/5xx, Cloudflare challenges) for GETs
+ * only — a POST that reached the server must not be replayed blindly.
  */
 export class CookieFetcher {
   readonly jar = new CookieJar();
 
   constructor(
-    private readonly userAgent: string,
+    private readonly net: Net,
     private readonly signal?: AbortSignal,
   ) {}
 
   async request(url: string, init?: CookieFetchInit): Promise<CookieFetchResult> {
+    const method = init?.method ?? 'GET';
+    const outcome = await this.net.retrying(() => this.attempt(url, init), {
+      inspect: (v) => (method === 'GET' ? v.failure : null),
+    });
+    return outcome.result;
+  }
+
+  private async attempt(
+    url: string,
+    init?: CookieFetchInit,
+  ): Promise<{ result: CookieFetchResult; failure: AttemptFailure | null }> {
     let current = url;
     let method = init?.method ?? 'GET';
     let body = init?.body;
@@ -40,13 +56,12 @@ export class CookieFetcher {
 
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       const cookie = await this.jar.getCookieString(current);
-      const res = await fetch(current, {
+      const res = await this.net.fetch(current, {
         method,
         redirect: 'manual',
         ...(body !== undefined ? { body } : {}),
         ...(this.signal ? { signal: this.signal } : {}),
         headers: {
-          'user-agent': this.userAgent,
           ...(cookie ? { cookie } : {}),
           ...extraHeaders,
         },
@@ -69,11 +84,15 @@ export class CookieFetcher {
         continue;
       }
 
+      const text = await res.text();
       return {
-        url: current,
-        status: res.status,
-        body: await res.text(),
-        contentType: res.headers.get('content-type'),
+        result: {
+          url: current,
+          status: res.status,
+          body: text,
+          contentType: res.headers.get('content-type'),
+        },
+        failure: classifyResponse(res.status, res.headers, text),
       };
     }
     throw new BetterCrawlError(

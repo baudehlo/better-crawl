@@ -123,6 +123,32 @@ By default better-crawl fetches `robots.txt` per origin and refuses disallowed U
 
 Note that generation performs up to `1 + maxRepairAttempts` real crawls of the target site while self-testing. Develop against a staging copy or a local fixture when you can.
 
+## Network options
+
+Both `generateCrawler` and `runCrawler` accept the same networking knobs, applied to every fetch and browser request the library makes (scout, self-test, replay, and heal alike):
+
+```ts
+{
+  // Route all traffic through a proxy. ignoreTlsErrors accepts the certificates of
+  // TLS-intercepting proxies (e.g. Bright Data's residential network).
+  proxy: { server: 'http://host:8080', username: 'u', password: 'p', ignoreTlsErrors: true },
+
+  // Extra headers on every request (merged over the user-agent; browser requests
+  // send them as extraHTTPHeaders).
+  headers: { 'x-team': 'data-eng' },
+
+  // Transient-failure retries — ON by default. Network drops retry for any method;
+  // 429/502/503/504 retry for GETs only. Exponential backoff: 1s doubling to 30s,
+  // 2 retries. `retry: { attempts: 0 }` disables.
+  retry: { attempts: 2, backoffMs: 1_000, maxBackoffMs: 30_000 },
+
+  // Launch a specific Chromium (e.g. a system browser in Docker) with extra args.
+  browser: { executablePath: '/usr/bin/chromium', args: ['--no-sandbox'] },
+}
+```
+
+Cloudflare challenges get their own retry schedule: a 403/503 carrying Cloudflare markers (`cf-ray`/`cf-mitigated` headers, a challenge page body) waits 5s doubling to a 300s cap, 4 attempts, independent of the ordinary retry budget. Tune or disable it with `retry.cloudflare` (`false`, or `{ attempts, backoffMs, maxBackoffMs }`). These waits count against `limits.timeoutMs` (10 minutes by default) — raise it for sites that challenge aggressively.
+
 ## Events
 
 Handles returned by `generateCrawler`/`runCrawler` are promises, async-iterables, and event emitters all at once:

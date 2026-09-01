@@ -69,6 +69,10 @@ export async function runGeneration(
     screenshots: opts.screenshots ?? false,
     ...(opts.screenshotDir !== undefined ? { screenshotDir: opts.screenshotDir } : {}),
     headless: opts.headless ?? true,
+    ...(opts.proxy !== undefined ? { proxy: opts.proxy } : {}),
+    ...(opts.headers !== undefined ? { headers: opts.headers } : {}),
+    ...(opts.retry !== undefined ? { retry: opts.retry } : {}),
+    ...(opts.browser !== undefined ? { browser: opts.browser } : {}),
   });
   addUsage(scout.usage);
   ctl.emit({
@@ -153,6 +157,10 @@ export async function runGeneration(
       screenshots: opts.screenshots ?? false,
       ...(opts.screenshotDir !== undefined ? { screenshotDir: opts.screenshotDir } : {}),
       headless: opts.headless ?? true,
+      ...(opts.proxy !== undefined ? { proxy: opts.proxy } : {}),
+      ...(opts.headers !== undefined ? { headers: opts.headers } : {}),
+      ...(opts.retry !== undefined ? { retry: opts.retry } : {}),
+      ...(opts.browser !== undefined ? { browser: opts.browser } : {}),
       phase: 'selftest',
     });
     if (result.report) reports.push(result.report);

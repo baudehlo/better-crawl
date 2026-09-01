@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { Browser, Page } from 'playwright';
 import type { CrawlEvent } from '../../src/events.js';
+import { Net } from '../../src/runtime/net.js';
 import { RobotsCache } from '../../src/runtime/robots.js';
 import { createValidator } from '../../src/runtime/validate.js';
 import { createScoutTools, ScoutState, type ScoutToolOptions } from '../../src/scout/tools.js';
@@ -72,6 +73,7 @@ describe.skipIf(!hasBrowser)('scout tools', () => {
         return { status: res.status, body: await res.text() };
       }, UA),
       userAgent: UA,
+      net: new Net({ userAgent: UA }),
       screenshots: false,
       ...overrides,
     };

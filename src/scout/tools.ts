@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Page } from 'playwright';
 import type { CrawlEvent } from '../events.js';
 import { condenseHtml, condensePage, scrubSecrets } from '../llm/condense.js';
+import type { Net } from '../runtime/net.js';
 import type { RobotsCache } from '../runtime/robots.js';
 import type { ItemValidator } from '../runtime/validate.js';
 import { loadAll } from '../runtime/paginate.js';
@@ -26,6 +27,8 @@ export interface ScoutToolOptions {
   limits: { maxPages: number; delayMs: number };
   robots?: RobotsCache;
   userAgent: string;
+  /** Proxy/header-aware fetch for the no-JS probe. */
+  net: Net;
   screenshots: boolean;
   screenshotDir?: string;
 }
@@ -368,10 +371,7 @@ export function createScoutTools(
         try {
           const blocked = await gate(url);
           if (blocked) return blocked;
-          const res = await fetch(url, {
-            headers: { 'user-agent': opts.userAgent },
-            signal: opts.signal,
-          });
+          const res = await opts.net.fetch(url, { signal: opts.signal });
           const condensed = scrub(condenseHtml(await res.text(), res.url || url));
           state.probeTexts.push(condensed);
           state.recordSnapshot(`probe:${url}`, condensed);

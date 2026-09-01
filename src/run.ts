@@ -39,6 +39,10 @@ async function runReplay(
     screenshots: opts.screenshots ?? false,
     ...(opts.screenshotDir !== undefined ? { screenshotDir: opts.screenshotDir } : {}),
     headless: opts.headless ?? true,
+    ...(opts.proxy !== undefined ? { proxy: opts.proxy } : {}),
+    ...(opts.headers !== undefined ? { headers: opts.headers } : {}),
+    ...(opts.retry !== undefined ? { retry: opts.retry } : {}),
+    ...(opts.browser !== undefined ? { browser: opts.browser } : {}),
     phase: 'run',
   };
 
@@ -86,6 +90,10 @@ async function runReplay(
         screenshots: opts.screenshots ?? false,
         ...(opts.screenshotDir !== undefined ? { screenshotDir: opts.screenshotDir } : {}),
         headless: opts.headless ?? true,
+        ...(opts.proxy !== undefined ? { proxy: opts.proxy } : {}),
+        ...(opts.headers !== undefined ? { headers: opts.headers } : {}),
+        ...(opts.retry !== undefined ? { retry: opts.retry } : {}),
+        ...(opts.browser !== undefined ? { browser: opts.browser } : {}),
         ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
       },
       ctl,

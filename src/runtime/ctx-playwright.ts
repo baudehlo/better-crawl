@@ -1,8 +1,17 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { Browser, Page } from 'playwright';
+import type { Browser, Page, Response as PwResponse } from 'playwright';
 import { NoMatchError, PlaywrightMissingError } from '../errors.js';
+import type { BrowserOptions, ProxyOptions } from '../types.js';
 import type { CtxBase, SharedRuntime } from './ctx-shared.js';
+import {
+  buildContextOptions,
+  buildLaunchOptions,
+  classifyResponse,
+  resolveRetry,
+  withRetry,
+  type ResolvedRetry,
+} from './net.js';
 import { loadAll, type LoadAllOptions } from './paginate.js';
 
 export interface PlaywrightCtx extends CtxBase {
@@ -32,6 +41,11 @@ export interface PlaywrightSessionOptions {
   screenshotDir?: string;
   /** Reuse an existing page (the scout does this); the session then won't own/close the browser. */
   existingPage?: Page;
+  proxy?: ProxyOptions;
+  headers?: Record<string, string>;
+  browser?: BrowserOptions;
+  /** Resolved retry schedule for goto navigations. Default: resolveRetry(undefined). */
+  retry?: ResolvedRetry;
 }
 
 export interface PlaywrightSession {
@@ -56,8 +70,12 @@ export async function createPlaywrightSession(
     } catch {
       throw new PlaywrightMissingError();
     }
-    browser = await pw.chromium.launch({ headless: opts.headless });
-    const context = await browser.newContext({ userAgent: opts.userAgent });
+    browser = await pw.chromium.launch(
+      buildLaunchOptions(opts.headless, opts.browser, opts.proxy),
+    );
+    const context = await browser.newContext(
+      buildContextOptions(opts.userAgent, opts.headers, opts.proxy),
+    );
     page = await context.newPage();
   }
 
@@ -93,13 +111,14 @@ export async function createPlaywrightSession(
   };
 
   const base = shared.createCtxBase(screenshot);
+  const retry = opts.retry ?? resolveRetry(undefined);
 
   const ctx: PlaywrightCtx = {
     ...base,
     page,
     goto: async (url) => {
       await shared.gate(url);
-      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      await gotoWithRetry(page, url, retry, shared);
       shared.recordVisit(page.url());
     },
     click: async (name) => {
@@ -169,4 +188,41 @@ export async function createPlaywrightSession(
       if (browser) await browser.close();
     },
   };
+}
+
+/** Chromium-level navigation failures worth a retry (dropped connections, gateway timeouts). */
+const GOTO_TRANSIENT_RE =
+  /net::ERR_(CONNECTION|TIMED_OUT|NETWORK|INTERNET_DISCONNECTED|SOCKET|EMPTY_RESPONSE|NAME_NOT_RESOLVED)|Timeout \d+ms exceeded/;
+
+async function gotoWithRetry(
+  page: Page,
+  url: string,
+  retry: ResolvedRetry,
+  shared: SharedRuntime,
+): Promise<void> {
+  await withRetry<PwResponse | null>(() => page.goto(url, { waitUntil: 'domcontentloaded' }), {
+    retry,
+    sleepFn: (ms) => shared.abortableSleep(ms),
+    classifyError: (err) =>
+      err instanceof Error && GOTO_TRANSIENT_RE.test(err.message)
+        ? { kind: 'transient', detail: err.message }
+        : null,
+    inspect: async (response) => {
+      if (!response) return null; // same-document navigation — nothing to judge
+      const status = response.status();
+      if (status < 400) return null;
+      const headers = await response.allHeaders().catch(() => ({}) as Record<string, string>);
+      // The rendered body is only needed for the Cloudflare check on 403/503.
+      const body =
+        status === 403 || status === 503 ? await page.content().catch(() => '') : '';
+      return classifyResponse(status, { get: (name) => headers[name.toLowerCase()] ?? null }, body);
+    },
+    onRetry: (info) => {
+      shared.emitEvent({
+        type: 'log',
+        level: 'warn',
+        message: `goto ${url}: retrying after ${info.failure.detail} — waiting ${info.delayMs}ms (attempt ${info.attempt}/${info.maxAttempts})`,
+      });
+    },
+  });
 }

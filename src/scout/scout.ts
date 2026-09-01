@@ -3,9 +3,10 @@ import { z } from 'zod';
 import type { CrawlEvent } from '../events.js';
 import { GenerationFailedError, PlaywrightMissingError } from '../errors.js';
 import type { LlmClient, LlmUsage } from '../llm/client.js';
+import { buildContextOptions, buildLaunchOptions, Net } from '../runtime/net.js';
 import { RobotsCache } from '../runtime/robots.js';
 import { createValidator } from '../runtime/validate.js';
-import type { Schemas } from '../types.js';
+import type { BrowserOptions, ProxyOptions, RetryOptions, Schemas } from '../types.js';
 import type { ScoutFindings } from './findings.js';
 import { createScoutTools, ScoutState } from './tools.js';
 
@@ -25,6 +26,10 @@ export interface ScoutRunOptions {
   screenshots: boolean;
   screenshotDir?: string;
   headless: boolean;
+  proxy?: ProxyOptions;
+  headers?: Record<string, string>;
+  retry?: RetryOptions;
+  browser?: BrowserOptions;
 }
 
 export interface ScoutRunResult {
@@ -76,18 +81,28 @@ export async function runScout(opts: ScoutRunOptions): Promise<ScoutRunResult> {
     throw new PlaywrightMissingError();
   }
 
-  const browser = await pw.chromium.launch({ headless: opts.headless });
+  const net = new Net({
+    userAgent: opts.userAgent,
+    proxy: opts.proxy,
+    headers: opts.headers,
+    retry: opts.retry,
+    signal: opts.signal,
+    emitEvent: opts.emitEvent,
+  });
+
+  const browser = await pw.chromium.launch(
+    buildLaunchOptions(opts.headless, opts.browser, opts.proxy),
+  );
   try {
-    const context = await browser.newContext({ userAgent: opts.userAgent });
+    const context = await browser.newContext(
+      buildContextOptions(opts.userAgent, opts.headers, opts.proxy),
+    );
     const page = await context.newPage();
 
     const robots = opts.ignoreRobots
       ? undefined
       : new RobotsCache(async (url) => {
-          const res = await fetch(url, {
-            headers: { 'user-agent': opts.userAgent },
-            signal: opts.signal,
-          });
+          const res = await net.fetch(url, { signal: opts.signal });
           return { status: res.status, body: await res.text() };
         }, opts.userAgent);
 
@@ -101,6 +116,7 @@ export async function runScout(opts: ScoutRunOptions): Promise<ScoutRunResult> {
       limits: { ...opts.limits },
       ...(robots ? { robots } : {}),
       userAgent: opts.userAgent,
+      net,
       screenshots: opts.screenshots,
       ...(opts.screenshotDir !== undefined ? { screenshotDir: opts.screenshotDir } : {}),
     });

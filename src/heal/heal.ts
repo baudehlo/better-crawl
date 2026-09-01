@@ -8,6 +8,7 @@ import type { CrawlEvent } from '../events.js';
 import type { LlmClient } from '../llm/client.js';
 import { condenseHtml } from '../llm/condense.js';
 import { executeArtifact, type ExecuteOptions, type ExecuteOutcome } from '../runtime/execute.js';
+import { Net } from '../runtime/net.js';
 import { buildFailureDigest } from '../selftest/digest.js';
 import { lintArtifact } from '../selftest/lint.js';
 import type { RunReport } from '../types.js';
@@ -147,10 +148,13 @@ async function resolveFreshPage(opts: HealOptions): Promise<string | undefined> 
   // Best-effort: a no-JS fetch of the entry page. For playwright-engine sites
   // this may miss rendered content, but structural signal beats nothing.
   try {
-    const res = await fetch(opts.artifact.manifest.entryUrl, {
-      headers: { 'user-agent': opts.userAgent },
+    const net = new Net({
+      userAgent: opts.userAgent,
+      proxy: opts.execOpts.proxy,
+      headers: opts.execOpts.headers,
       signal: opts.signal,
     });
+    const res = await net.fetch(opts.artifact.manifest.entryUrl, { signal: opts.signal });
     return condenseHtml(await res.text(), res.url || opts.artifact.manifest.entryUrl);
   } catch {
     return undefined;

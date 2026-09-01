@@ -22,5 +22,8 @@ export type {
   RunReport,
   GenerateResult,
   RunResult,
+  ProxyOptions,
+  RetryOptions,
+  BrowserOptions,
 } from './types.js';
 export * from './errors.js';
