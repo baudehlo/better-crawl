@@ -81,6 +81,50 @@ describe('createLlmClient().runAgentLoop', () => {
 describe('createLlmClient().generateObject', () => {
   const schema = z.object({ answer: z.number() });
 
+  it('rewrites AI_NoObjectGeneratedError into actionable INVALID_OBJECT feedback with the zod issues', async () => {
+    const sdkError = Object.assign(new Error('No object generated: response did not match schema.'), {
+      name: 'AI_NoObjectGeneratedError',
+      cause: {
+        message: 'Type validation failed',
+        cause: {
+          issues: [
+            { path: ['assertions', 0, 'kind'], message: 'Invalid enum value' },
+            { path: ['code'], message: 'Required' },
+          ],
+        },
+      },
+    });
+    generateText.mockRejectedValue(sdkError);
+    const client = createLlmClient();
+    const rejection = await client
+      .generateObject({ model: MODEL, messages: [], schema })
+      .then(() => undefined)
+      .catch((err: Error) => err);
+    expect(rejection?.message).toContain('INVALID_OBJECT');
+    expect(rejection?.message).toContain('assertions.0.kind: Invalid enum value');
+    expect(rejection?.message).toContain('code: Required');
+    expect(rejection?.cause).toBe(sdkError);
+  });
+
+  it('falls back to the cause message when no zod issues are attached (JSON parse failure)', async () => {
+    generateText.mockRejectedValue(
+      Object.assign(new Error('No object generated.'), {
+        name: 'AI_NoObjectGeneratedError',
+        cause: { message: 'JSON parsing failed: unexpected end of input' },
+      }),
+    );
+    const client = createLlmClient();
+    await expect(client.generateObject({ model: MODEL, messages: [], schema })).rejects.toThrow(
+      /INVALID_OBJECT.*JSON parsing failed/s,
+    );
+  });
+
+  it('rethrows unrelated errors untouched', async () => {
+    generateText.mockRejectedValue(new Error('ECONNRESET'));
+    const client = createLlmClient();
+    await expect(client.generateObject({ model: MODEL, messages: [], schema })).rejects.toThrow('ECONNRESET');
+  });
+
   it('returns the structured output and usage', async () => {
     generateText.mockResolvedValue({
       finishReason: 'stop',

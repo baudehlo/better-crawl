@@ -86,15 +86,25 @@ export function createLlmClient(): LlmClient {
     },
 
     async generateObject(opts) {
-      const result = await generateText({
-        model: opts.model,
-        maxRetries: 3,
-        messages: opts.messages,
-        output: Output.object({ schema: opts.schema }),
-        ...(opts.maxOutputTokens !== undefined ? { maxOutputTokens: opts.maxOutputTokens } : {}),
-        ...(opts.signal ? { abortSignal: opts.signal } : {}),
-        providerOptions: ANTHROPIC_PROVIDER_OPTIONS,
-      });
+      let result: Awaited<ReturnType<typeof generateText>> & { output?: unknown };
+      try {
+        result = await generateText({
+          model: opts.model,
+          maxRetries: 3,
+          messages: opts.messages,
+          output: Output.object({ schema: opts.schema }),
+          ...(opts.maxOutputTokens !== undefined ? { maxOutputTokens: opts.maxOutputTokens } : {}),
+          ...(opts.signal ? { abortSignal: opts.signal } : {}),
+          providerOptions: ANTHROPIC_PROVIDER_OPTIONS,
+        });
+      } catch (err) {
+        // The SDK's schema-mismatch error is generic; repair turns need the
+        // actual issues or the model just fails the same way again.
+        if (err instanceof Error && err.name === 'AI_NoObjectGeneratedError') {
+          throw invalidObjectError(err);
+        }
+        throw err;
+      }
       if (result.finishReason === 'content-filter') {
         throw new GenerationRefusedError('content filter triggered during code generation');
       }
@@ -107,4 +117,28 @@ export function createLlmClient(): LlmClient {
       return { object: result.output as never, usage: toUsage(result.totalUsage) };
     },
   };
+}
+
+/**
+ * Distill an AI_NoObjectGeneratedError into feedback a repair turn can act on.
+ * The zod issues live at err.cause (TypeValidationError) → .cause (ZodError)
+ * .issues; a JSON-parse failure only has a cause message. Everything is capped
+ * so a giant embedded value can't blow up the conversation.
+ */
+function invalidObjectError(err: Error & { cause?: unknown }): Error {
+  const nested = err.cause as
+    | { message?: string; cause?: { issues?: Array<{ path?: Array<string | number>; message?: string }> } }
+    | undefined;
+  const issues = nested?.cause?.issues;
+  const detail =
+    Array.isArray(issues) && issues.length > 0
+      ? issues
+          .slice(0, 20)
+          .map((issue) => `- ${(issue.path ?? []).join('.') || '(root)'}: ${issue.message ?? 'invalid'}`)
+          .join('\n')
+      : (nested?.message ?? err.message).slice(0, 1_500);
+  return new Error(
+    `INVALID_OBJECT: the response did not match the expected schema:\n${detail}`,
+    { cause: err },
+  );
 }
