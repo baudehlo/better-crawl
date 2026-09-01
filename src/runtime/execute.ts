@@ -35,6 +35,7 @@ export interface ExecuteOptions {
   moduleDir?: string;
   screenshots?: boolean;
   screenshotDir?: string;
+  pageEvents?: boolean;
   headless?: boolean;
   proxy?: ProxyOptions;
   headers?: Record<string, string>;
@@ -122,6 +123,7 @@ export async function executeArtifact(
     signal,
     limits,
     ...(robots ? { robots } : {}),
+    ...(opts.pageEvents !== undefined ? { pageEvents: opts.pageEvents } : {}),
   });
 
   const startedAt = Date.now();

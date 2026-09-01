@@ -113,6 +113,17 @@ export async function createPlaywrightSession(
   const base = shared.createCtxBase(screenshot);
   const retry = opts.retry ?? resolveRetry(undefined);
 
+  // Raw-page events cost a DOM serialization each — best-effort, and only
+  // when the host asked. Snapshot is post-navigation (pre-interaction).
+  const emitPageSnapshot = async (): Promise<void> => {
+    if (!shared.pageEvents) return;
+    try {
+      shared.emitPage(page.url(), await page.content());
+    } catch {
+      // a mid-navigation snapshot must never fail the crawl
+    }
+  };
+
   const ctx: PlaywrightCtx = {
     ...base,
     page,
@@ -120,13 +131,17 @@ export async function createPlaywrightSession(
       await shared.gate(url);
       await gotoWithRetry(page, url, retry, shared);
       shared.recordVisit(page.url());
+      await emitPageSnapshot();
     },
     click: async (name) => {
       const css = await requireMatch(name);
       const urlBefore = page.url();
       await page.locator(css).first().click();
       await page.waitForLoadState('domcontentloaded').catch(() => undefined);
-      if (page.url() !== urlBefore) shared.recordVisit(page.url());
+      if (page.url() !== urlBefore) {
+        shared.recordVisit(page.url());
+        await emitPageSnapshot();
+      }
     },
     fill: async (name, value) => {
       const css = await requireMatch(name);

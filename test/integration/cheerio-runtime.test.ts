@@ -84,6 +84,37 @@ describe('cheerio runtime', () => {
     expect(report.progressTrail).toContain('fetching listing');
   });
 
+  it('emits a page event per fetched page when pageEvents is on, none by default', async () => {
+    const code = `export default async function crawl(ctx) {
+  const listing = await ctx.fetch(ctx.entryUrl);
+  const href = ctx.select(listing, 'productRow').first().find('a').attr('href');
+  await ctx.fetch(ctx.absolute(href, listing.url));
+}
+`;
+    const selectors = {
+      productRow: { css: 'li.product', description: 'listing rows', expect: 'many' as const },
+    };
+
+    const events: CrawlEvent[] = [];
+    await executeArtifact(makeArtifact({ entryUrl: `${store.url}/`, selectors }, code), {
+      limits: FAST,
+      pageEvents: true,
+      emitEvent: (e) => events.push(e),
+    });
+    const pages = events.filter((e) => e.type === 'page');
+    expect(pages).toHaveLength(2);
+    expect(pages[0]).toMatchObject({ phase: 'run', url: `${store.url}/` });
+    expect(pages[0]?.html).toContain('Static Store');
+    expect(pages[1]?.url).toContain('/p/');
+
+    const silent: CrawlEvent[] = [];
+    await executeArtifact(makeArtifact({ entryUrl: `${store.url}/`, selectors }, code), {
+      limits: FAST,
+      emitEvent: (e) => silent.push(e),
+    });
+    expect(silent.filter((e) => e.type === 'page')).toHaveLength(0);
+  });
+
   it('isolates invalid items and strips nulls on optional fields', async () => {
     const artifact = makeArtifact(
       { entryUrl: `${store.url}/` },

@@ -27,6 +27,7 @@ export function createCheerioCtx(
   const toPage = (result: { url: string; status: number; body: string }): FetchedPage => {
     shared.recordVisit(result.url);
     shared.lastPage = { url: result.url, html: result.body };
+    if (shared.pageEvents) shared.emitPage(result.url, result.body);
     return { $: cheerio.load(result.body), url: result.url, status: result.status };
   };
 

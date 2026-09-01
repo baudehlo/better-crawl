@@ -45,6 +45,7 @@ export interface SharedRuntimeOptions {
   signal: AbortSignal;
   limits: { maxPages: number; delayMs: number; maxItems?: number };
   robots?: RobotsCache;
+  pageEvents?: boolean;
 }
 
 const PROGRESS_TRAIL_CAP = 30;
@@ -132,6 +133,15 @@ export class SharedRuntime {
 
   emitEvent(event: CrawlEvent): void {
     this.opts.emitEvent(event);
+  }
+
+  /** Whether the host asked for raw-page events — engines check this BEFORE paying for a snapshot. */
+  get pageEvents(): boolean {
+    return this.opts.pageEvents ?? false;
+  }
+
+  emitPage(url: string, html: string): void {
+    this.emitEvent({ type: 'page', phase: this.opts.phase, url, html });
   }
 
   /** Build the engine-independent part of the ctx handed to generated code. */

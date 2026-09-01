@@ -159,6 +159,7 @@ Handles returned by `generateCrawler`/`runCrawler` are promises, async-iterables
 | `item` | `{ schema, item }` — validated, streamed as found |
 | `invalid-item` | `{ schema, issues, raw }` — recorded, never fatal |
 | `screenshot` | `{ label, buffer? , path? }` — enable with `screenshots: true` (+ `screenshotDir`) |
+| `page` | `{ phase, url, html }` — raw page after each navigation; enable with `pageEvents: true`. Free on cheerio; costs a DOM serialization per page on playwright (snapshotted post-navigation, pre-interaction). Fires during self-test/replay/heal, not the scout. Lets the host run its own passes (meta tags, link scans) without re-fetching |
 | `llm-usage` | `{ phase, inputTokens, outputTokens }` |
 | `artifact-updated` | `{ artifact }` — a heal produced a repair; persist it |
 | `log` / `error` | diagnostics |

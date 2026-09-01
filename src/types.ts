@@ -64,6 +64,15 @@ export interface CommonOptions {
   browser?: BrowserOptions;
   /** Emit screenshot events (playwright engine only). */
   screenshots?: boolean;
+  /**
+   * Emit a `page` event ({url, html}) after every successful navigation, so
+   * the host can run its own passes over raw pages (meta tags, link scans)
+   * without a second fetch. Free on the cheerio engine; on playwright each
+   * event costs a page.content() DOM serialization, snapshotted right after
+   * navigation (before any load-more/scroll interactions). Fires during
+   * self-test, replay, and heal runs — not the scout. Default false.
+   */
+  pageEvents?: boolean;
   /** When set, screenshots are written here and events carry `path` instead of `buffer`. */
   screenshotDir?: string;
   /** Skip robots.txt checks. Default false. */

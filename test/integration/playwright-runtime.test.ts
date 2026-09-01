@@ -68,6 +68,35 @@ describe.skipIf(!hasBrowser)('playwright runtime', () => {
     expect(items['product']?.[0]).toEqual({ name: 'Gadget 1', price: 5 });
   });
 
+  it('emits a rendered page event after goto when pageEvents is on', async () => {
+    const artifact = makeArtifact(
+      {
+        engine: 'playwright',
+        entryUrl: `${jsStore.url}/`,
+        selectors: {
+          productRow: { css: 'li.product', description: 'product rows', expect: 'many' },
+        },
+      },
+      `export default async function crawl(ctx) {
+  await ctx.goto(ctx.entryUrl);
+}
+`,
+    );
+
+    const events: Array<{ type: string; url?: string; html?: string; phase?: string }> = [];
+    const { report } = await executeArtifact(artifact, {
+      limits: FAST,
+      pageEvents: true,
+      emitEvent: (e) => events.push(e),
+    });
+    expect(report.runtimeError).toBeUndefined();
+    const pages = events.filter((e) => e.type === 'page');
+    expect(pages).toHaveLength(1);
+    expect(pages[0]).toMatchObject({ phase: 'run', url: `${jsStore.url}/` });
+    // the snapshot is the live DOM, so it includes what client-side JS rendered
+    expect(pages[0]?.html).toContain('class="product"');
+  });
+
   it('loadAll survives the async-count trap and exhausts the listing', async () => {
     const artifact = makeArtifact(
       {
