@@ -78,6 +78,29 @@ describe('createLlmClient().runAgentLoop', () => {
   });
 });
 
+describe('createLlmClient().runAgentLoop finalTool', () => {
+  it('forces the named tool on the last steps of the budget, and only there', async () => {
+    generateText.mockResolvedValue({ finishReason: 'stop', totalUsage: {}, steps: [] });
+    const client = createLlmClient();
+    await client.runAgentLoop({ model: MODEL, system: 's', prompt: 'p', tools: {}, maxSteps: 40, finalTool: 'report_findings' });
+    const call = generateText.mock.calls[0]?.[0] as {
+      prepareStep: (ctx: { stepNumber: number }) => { toolChoice?: { type: string; toolName: string } } | undefined;
+    };
+    expect(call.prepareStep({ stepNumber: 0 })).toBeUndefined();
+    expect(call.prepareStep({ stepNumber: 36 })).toBeUndefined();
+    expect(call.prepareStep({ stepNumber: 37 })).toEqual({ toolChoice: { type: 'tool', toolName: 'report_findings' } });
+    expect(call.prepareStep({ stepNumber: 39 })).toEqual({ toolChoice: { type: 'tool', toolName: 'report_findings' } });
+  });
+
+  it('omits prepareStep when no finalTool is set', async () => {
+    generateText.mockResolvedValue({ finishReason: 'stop', totalUsage: {}, steps: [] });
+    const client = createLlmClient();
+    await client.runAgentLoop({ model: MODEL, system: 's', prompt: 'p', tools: {}, maxSteps: 5 });
+    const call = generateText.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(call.prepareStep).toBeUndefined();
+  });
+});
+
 describe('createLlmClient().generateObject', () => {
   const schema = z.object({ answer: z.number() });
 

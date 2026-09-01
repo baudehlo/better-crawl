@@ -23,7 +23,16 @@ export interface AgentLoopOptions {
   maxSteps: number;
   onStepFinish?: (step: StepResult<ToolSet>) => void | Promise<void>;
   signal?: AbortSignal;
+  /**
+   * Force this tool on the loop's last few steps. For loops whose only valid
+   * exit is a specific tool (the scout's report_findings), this stops a model
+   * from exploring right through its budget and never reporting.
+   */
+  finalTool?: string;
 }
+
+/** How many trailing steps get the forced finalTool (room for one rejection + fix). */
+const FINAL_TOOL_FORCED_STEPS = 3;
 
 export interface ObjectCallOptions<T> {
   model: LanguageModel;
@@ -75,6 +84,14 @@ export function createLlmClient(): LlmClient {
         stopWhen: stepCountIs(opts.maxSteps),
         ...(opts.signal ? { abortSignal: opts.signal } : {}),
         ...(opts.onStepFinish ? { onStepFinish: opts.onStepFinish } : {}),
+        ...(opts.finalTool !== undefined
+          ? {
+              prepareStep: ({ stepNumber }: { stepNumber: number }) =>
+                stepNumber >= opts.maxSteps - FINAL_TOOL_FORCED_STEPS
+                  ? { toolChoice: { type: 'tool' as const, toolName: opts.finalTool as string } }
+                  : undefined,
+            }
+          : {}),
         providerOptions: {
           anthropic: { cacheControl: { type: 'ephemeral' as const } },
         },

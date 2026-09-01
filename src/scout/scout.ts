@@ -133,6 +133,9 @@ export async function runScout(opts: ScoutRunOptions): Promise<ScoutRunResult> {
       prompt: `The start URL is: ${opts.url}\n\nBegin by calling navigate on it.`,
       tools,
       maxSteps: opts.maxSteps,
+      // The only valid exit is an ACCEPTED report_findings — force it near the
+      // step budget so exploration can't silently eat the whole loop.
+      finalTool: 'report_findings',
       signal: opts.signal,
       onStepFinish: (step) => {
         const toolNames = step.toolCalls.map((call) => call.toolName);
