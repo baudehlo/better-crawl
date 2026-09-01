@@ -1,5 +1,5 @@
 import type { LanguageModel } from 'ai';
-import { z } from 'zod';
+import { toJsonSchema } from '../json-schema.js';
 import type { CrawlEvent } from '../events.js';
 import { GenerationFailedError, PlaywrightMissingError } from '../errors.js';
 import type { LlmClient, LlmUsage } from '../llm/client.js';
@@ -44,7 +44,7 @@ export function buildScoutSystemPrompt(opts: {
   inputNames: string[];
 }): string {
   const schemaText = Object.entries(opts.schemas)
-    .map(([name, schema]) => `### ${name}\n${JSON.stringify(z.toJSONSchema(schema))}`)
+    .map(([name, schema]) => `### ${name}\n${JSON.stringify(toJsonSchema(schema))}`)
     .join('\n\n');
 
   return `You are a web-crawling scout. Explore the target site, work out exactly how the requested data can be extracted, and submit your conclusions with the report_findings tool. A separate step will turn your findings into a permanent crawler program, so your job is reconnaissance, not bulk extraction.

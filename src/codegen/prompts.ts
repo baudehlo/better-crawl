@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { toJsonSchema } from '../json-schema.js';
 import type { Schemas } from '../types.js';
 import type { ScoutFindings } from '../scout/findings.js';
 
@@ -113,7 +113,7 @@ export interface CodegenUserContext {
 
 export function buildCodegenUserMessage(ctx: CodegenUserContext): string {
   const schemaText = Object.entries(ctx.schemas)
-    .map(([name, schema]) => `### ${name}\n${JSON.stringify(z.toJSONSchema(schema))}`)
+    .map(([name, schema]) => `### ${name}\n${JSON.stringify(toJsonSchema(schema))}`)
     .join('\n\n');
 
   const selectorLines = Object.entries(ctx.findings.selectors)

@@ -1,5 +1,5 @@
 import type { ModelMessage } from 'ai';
-import { z } from 'zod';
+import { toJsonSchema } from './json-schema.js';
 import {
   Artifact,
   ARTIFACT_FORMAT_VERSION,
@@ -280,7 +280,7 @@ function assembleArtifact(args: {
 
   const schemas: Record<string, JsonSchemaObject> = {};
   for (const [name, schema] of Object.entries(opts.schemas)) {
-    schemas[name] = z.toJSONSchema(schema) as JsonSchemaObject;
+    schemas[name] = toJsonSchema(schema);
   }
 
   const manifest: ArtifactManifest = {
