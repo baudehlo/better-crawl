@@ -69,8 +69,15 @@ export async function createPlaywrightSession(
     let pw: typeof import('playwright');
     try {
       pw = await import('playwright');
-    } catch {
-      throw new PlaywrightMissingError();
+    } catch (err) {
+      // Only a genuinely absent package means "install playwright" — anything
+      // else (a permission denial in the sandbox, a broken install) must
+      // surface as itself or it's undebuggable.
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') {
+        throw new PlaywrightMissingError();
+      }
+      throw err;
     }
     browser = opts.connectWsEndpoint
       ? await pw.chromium.connect(opts.connectWsEndpoint)
