@@ -276,10 +276,15 @@ function permissionFlags(moduleDir: string): string[] {
   // and each grant needs its own flag (comma lists are not reliably parsed).
   const grants = [...roots].map((root) => `--allow-fs-read=${root}${path.sep}*`);
   if (process.platform === 'linux') {
-    // playwright-core's bundled is-wsl probes /proc/version at module load;
-    // on Node 22 a permission denial makes existsSync THROW instead of
-    // returning false, killing the import. The file is a harmless read.
-    grants.push('--allow-fs-read=/proc/version');
+    // playwright-core's bundled is-wsl probes these at module load — the
+    // existsSync calls are unguarded, and on Node 22 a permission denial
+    // makes existsSync THROW instead of returning false, killing the import.
+    // All three are harmless kernel-flag reads.
+    grants.push(
+      '--allow-fs-read=/proc/version',
+      '--allow-fs-read=/proc/sys/fs/binfmt_misc/WSLInterop',
+      '--allow-fs-read=/run/WSL',
+    );
   }
   return [flag, ...grants];
 }
