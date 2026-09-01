@@ -274,5 +274,12 @@ function permissionFlags(moduleDir: string): string[] {
   }
   // A bare path is an exact-file grant, so directory trees need the wildcard —
   // and each grant needs its own flag (comma lists are not reliably parsed).
-  return [flag, ...[...roots].map((root) => `--allow-fs-read=${root}${path.sep}*`)];
+  const grants = [...roots].map((root) => `--allow-fs-read=${root}${path.sep}*`);
+  if (process.platform === 'linux') {
+    // playwright-core's bundled is-wsl probes /proc/version at module load;
+    // on Node 22 a permission denial makes existsSync THROW instead of
+    // returning false, killing the import. The file is a harmless read.
+    grants.push('--allow-fs-read=/proc/version');
+  }
+  return [flag, ...grants];
 }
