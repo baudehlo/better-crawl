@@ -94,6 +94,7 @@ ${engine === 'playwright' ? PLAYWRIGHT_CTX_API : CHEERIO_CTX_API}
 6. Call ctx.progress at each phase (e.g. "logged in", "reading detail 3/20").
 7. Handle absence gracefully: check counts/lengths before indexing; a missing optional field is null, not a crash.
 8. Keep the code short and boring. Prefer the ctx helpers over clever DOM logic. Use ctx.loadAll for any "load more" pattern (playwright).
+9. NEVER hardcode the current year, today's date, or any "now" constant — your sense of the present is stale and the program will replay for months or years. When source text omits the year (e.g. "Week 1 (June 29)"), compute it at runtime from \`new Date()\`: pick the year that places the date in the window the page is advertising (a seasonal or upcoming-programs listing means the current or next occurrence of that date, never a past one). The scout's sample items may contain guessed years — recompute, don't copy.
 
 ## The manifest you return alongside the code
 - "selectors": every selector the code references, with a one-line description and expect: "one" | "many" | "maybe". Reuse the scout's verified selector names/CSS wherever they fit.
