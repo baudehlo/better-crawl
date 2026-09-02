@@ -40,7 +40,9 @@ describe('createLlmClient().runAgentLoop', () => {
     expect(result).toEqual({ usage: { inputTokens: 11, outputTokens: 22 }, steps: 3 });
     const call = generateText.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(call.system).toBe('sys');
-    expect(call.abortSignal).toBe(signal);
+    // the caller signal is merged with the hang-breaker timeout
+    expect(call.abortSignal).toBeInstanceOf(AbortSignal);
+    expect((call.abortSignal as AbortSignal).aborted).toBe(false);
     expect(call.onStepFinish).toBe(onStepFinish);
     expect(call.stopWhen).toEqual({ __stopWhen: 5 });
   });
@@ -61,7 +63,7 @@ describe('createLlmClient().runAgentLoop', () => {
     });
     expect(result.usage).toEqual({ inputTokens: 0, outputTokens: 0 });
     const call = generateText.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect('abortSignal' in call).toBe(false);
+    expect(call.abortSignal).toBeInstanceOf(AbortSignal); // timeout signal is always attached
     expect('onStepFinish' in call).toBe(false);
   });
 
@@ -167,7 +169,9 @@ describe('createLlmClient().generateObject', () => {
     expect(result.usage).toEqual({ inputTokens: 5, outputTokens: 6 });
     const call = generateText.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(call.maxOutputTokens).toBe(1000);
-    expect(call.abortSignal).toBe(signal);
+    // the caller signal is merged with the hang-breaker timeout
+    expect(call.abortSignal).toBeInstanceOf(AbortSignal);
+    expect((call.abortSignal as AbortSignal).aborted).toBe(false);
   });
 
   it('omits maxOutputTokens and signal when not provided', async () => {
@@ -180,7 +184,7 @@ describe('createLlmClient().generateObject', () => {
     await client.generateObject({ model: MODEL, messages: [], schema });
     const call = generateText.mock.calls[0]?.[0] as Record<string, unknown>;
     expect('maxOutputTokens' in call).toBe(false);
-    expect('abortSignal' in call).toBe(false);
+    expect(call.abortSignal).toBeInstanceOf(AbortSignal); // timeout signal is always attached
   });
 
   it('throws GenerationRefusedError on a content filter', async () => {

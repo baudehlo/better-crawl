@@ -60,6 +60,18 @@ function toUsage(usage: { inputTokens?: number | undefined; outputTokens?: numbe
   };
 }
 
+// A stalled connection must become a failure, never a hang — a hung LLM call
+// blocks the whole generation (and, in serial-queue hosts, everything behind
+// it). Structured-output calls are a single request; the agent loop spans many
+// steps, so its budget is much larger. Both merge with the caller's signal.
+const OBJECT_CALL_TIMEOUT_MS = 10 * 60_000;
+const AGENT_LOOP_TIMEOUT_MS = 45 * 60_000;
+
+function withTimeout(signal: AbortSignal | undefined, ms: number): AbortSignal {
+  const timeout = AbortSignal.timeout(ms);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
 /**
  * Anthropic-specific niceties (prompt caching, jsonTool structured-output mode)
  * are passed via providerOptions — other providers simply ignore them.
@@ -82,7 +94,7 @@ export function createLlmClient(): LlmClient {
         tools: opts.tools,
         toolChoice: 'auto',
         stopWhen: stepCountIs(opts.maxSteps),
-        ...(opts.signal ? { abortSignal: opts.signal } : {}),
+        abortSignal: withTimeout(opts.signal, AGENT_LOOP_TIMEOUT_MS),
         ...(opts.onStepFinish ? { onStepFinish: opts.onStepFinish } : {}),
         ...(opts.finalTool !== undefined
           ? {
@@ -111,7 +123,7 @@ export function createLlmClient(): LlmClient {
           messages: opts.messages,
           output: Output.object({ schema: opts.schema }),
           ...(opts.maxOutputTokens !== undefined ? { maxOutputTokens: opts.maxOutputTokens } : {}),
-          ...(opts.signal ? { abortSignal: opts.signal } : {}),
+          abortSignal: withTimeout(opts.signal, OBJECT_CALL_TIMEOUT_MS),
           providerOptions: ANTHROPIC_PROVIDER_OPTIONS,
         });
       } catch (err) {
