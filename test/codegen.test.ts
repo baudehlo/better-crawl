@@ -50,11 +50,12 @@ describe('codegen prompts', () => {
     expect(cheerio).not.toContain('ctx.goto');
   });
 
-  it('system prompt forbids hardcoding the current date/year (undated source text)', () => {
+  it('system prompt forbids hardcoding the year and pins undated dates to the running year', () => {
     for (const engine of ['playwright', 'cheerio'] as const) {
       const prompt = buildCodegenSystemPrompt(engine);
-      expect(prompt).toContain('NEVER hardcode the current year');
-      expect(prompt).toContain('new Date()');
+      expect(prompt).toContain('NEVER hardcode a year');
+      expect(prompt).toContain('new Date().getFullYear()');
+      expect(prompt).toContain('the year the crawl is running');
     }
   });
 
