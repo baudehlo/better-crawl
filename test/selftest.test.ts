@@ -23,6 +23,21 @@ describe('lintArtifact', () => {
     expect(lintArtifact(artifact)).toEqual([]);
   });
 
+  it('adds the host\'s codeChecks to its own errors', () => {
+    const artifact = makeArtifact(
+      { selectors },
+      `export default async function crawl(ctx) { ctx.emit('item', { start: '2026-07-06' }); }\n`,
+    );
+    const seen: string[] = [];
+    const errors = lintArtifact(artifact, (code) => {
+      seen.push(code);
+      return code.includes("'2026-07-06'") ? ['dates written into the code'] : [];
+    });
+    expect(seen).toEqual([artifact.code]);
+    expect(errors).toEqual(['dates written into the code']);
+    expect(lintArtifact(artifact, () => [])).toEqual([]);
+  });
+
   it('rejects missing export default', () => {
     const artifact = makeArtifact({ selectors }, 'async function crawl(ctx) {}\n');
     expect(lintArtifact(artifact)).toContainEqual(expect.stringContaining('export default'));
@@ -193,6 +208,13 @@ describe('runSelfTest', () => {
     const result = await runSelfTest(artifact, {});
     expect(result.passed).toBe(false);
     expect(result.lintErrors.length).toBeGreaterThan(0);
+    expect(result.report).toBeUndefined();
+  });
+
+  it("fails on the host's codeChecks without running the code", async () => {
+    const artifact = makeArtifact({}, `export default async function crawl(ctx) { ctx.progress('did nothing'); }\n`);
+    const result = await runSelfTest(artifact, { limits: { delayMs: 0 } }, () => ['no data in the code']);
+    expect(result).toMatchObject({ passed: false, lintErrors: ['no data in the code'] });
     expect(result.report).toBeUndefined();
   });
 

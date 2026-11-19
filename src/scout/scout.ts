@@ -20,6 +20,8 @@ export interface ScoutRunOptions {
   emitEvent: (event: CrawlEvent) => void;
   signal: AbortSignal;
   maxSteps: number;
+  /** Input-token budget of the scout loop (see AgentLoopOptions.maxInputTokens). */
+  maxInputTokens?: number;
   limits: { maxPages: number; delayMs: number };
   ignoreRobots: boolean;
   userAgent: string;
@@ -133,6 +135,7 @@ export async function runScout(opts: ScoutRunOptions): Promise<ScoutRunResult> {
       prompt: `The start URL is: ${opts.url}\n\nBegin by calling navigate on it.`,
       tools,
       maxSteps: opts.maxSteps,
+      ...(opts.maxInputTokens !== undefined ? { maxInputTokens: opts.maxInputTokens } : {}),
       // The only valid exit is an ACCEPTED report_findings — force it near the
       // step budget so exploration can't silently eat the whole loop.
       finalTool: 'report_findings',
@@ -166,7 +169,8 @@ export async function runScout(opts: ScoutRunOptions): Promise<ScoutRunResult> {
     if (!state.findings) {
       throw new GenerationFailedError(
         `The scout finished ${steps} step(s) without an accepted report_findings — ` +
-          `the site may be too complex for the step budget (${opts.maxSteps}), or access failed. ` +
+          `the site may be too complex for the step budget (${opts.maxSteps})` +
+          `${opts.maxInputTokens !== undefined ? ` or the input-token budget (${opts.maxInputTokens}; used ${usage.inputTokens})` : ''}, or access failed. ` +
           `Check progress events for details.`,
         undefined,
         [],

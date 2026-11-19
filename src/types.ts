@@ -87,6 +87,12 @@ export interface CommonOptions {
   /** Run the browser headed (debugging). Default true = headless. */
   headless?: boolean;
   /**
+   * The host's own static checks on generated code, run with the library's lint
+   * before any self-test (generation and heal). Each returned string is a
+   * failure the repair turn is asked to fix; none means the code passes.
+   */
+  codeChecks?: (code: string) => string[];
+  /**
    * Artifact code runs SANDBOXED by default: a child process with a clean
    * environment (no secrets) and Node's permission model (read-only fs limited
    * to the code and node_modules, no child processes, no workers). Network,
@@ -108,6 +114,12 @@ export interface GenerateOptions extends CommonOptions {
   repairModel?: LanguageModel;
   /** Scout agent-loop step budget. Default 40. */
   maxScoutSteps?: number;
+  /**
+   * Scout input-token budget, summed over its steps (each step re-sends the
+   * whole conversation). report_findings is forced from 80% of it on and the
+   * scout stops when it is spent. Default: no budget (steps only).
+   */
+  maxScoutInputTokens?: number;
   /** Self-test repair attempts (after the first try) before giving up. Default 3. */
   maxRepairAttempts?: number;
   /** Internal/test hook: replace the AI SDK adapter. */

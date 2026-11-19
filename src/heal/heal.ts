@@ -43,6 +43,8 @@ export interface HealOptions {
   healAttempts: number;
   execOpts: ExecuteOptions;
   userAgent: string;
+  /** The host's static checks on generated code (CommonOptions.codeChecks). */
+  codeChecks?: (code: string) => string[];
 }
 
 export interface HealResult {
@@ -105,7 +107,7 @@ export async function healArtifact(opts: HealOptions): Promise<HealResult> {
     });
 
     const candidate = assembleHealedArtifact(opts.artifact, output);
-    const lintErrors = lintArtifact(candidate);
+    const lintErrors = lintArtifact(candidate, opts.codeChecks);
     if (lintErrors.length > 0) {
       messages.push({ role: 'assistant', content: JSON.stringify(output) });
       messages.push({

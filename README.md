@@ -140,6 +140,11 @@ By default better-crawl fetches `robots.txt` per origin and refuses disallowed U
 
 Note that generation performs up to `1 + maxRepairAttempts` real crawls of the target site while self-testing. Develop against a staging copy or a local fixture when you can.
 
+## Cost and code checks
+
+- `maxScoutInputTokens` caps the scout's input tokens, summed over its steps (every step re-sends the whole conversation, so input grows with steps × pages read). From 80% of it the scout is forced to report its findings; when it is spent the loop stops. Without it only `maxScoutSteps` limits the scout.
+- `codeChecks: (code) => string[]` adds your own static checks to the library's lint, for generation and heal: every string returned is a failure that the repair turn is asked to fix, before any live self-test run.
+
 ## Network options
 
 Both `generateCrawler` and `runCrawler` accept the same networking knobs, applied to every fetch and browser request the library makes (scout, self-test, replay, and heal alike):

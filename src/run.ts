@@ -121,6 +121,7 @@ async function runReplay(
     healAttempts: opts.healAttempts ?? 2,
     execOpts: { ...execOpts, phase: 'heal' },
     userAgent,
+    ...(opts.codeChecks !== undefined ? { codeChecks: opts.codeChecks } : {}),
   });
   ctl.emit({ type: 'artifact-updated', artifact: healed.artifact });
   return {

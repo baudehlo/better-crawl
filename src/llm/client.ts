@@ -29,10 +29,23 @@ export interface AgentLoopOptions {
    * from exploring right through its budget and never reporting.
    */
   finalTool?: string;
+  /**
+   * Input-token budget for the whole loop (summed over steps; every step
+   * re-sends the conversation, so this grows with steps × pages read). The
+   * loop stops once it is spent, and finalTool is forced from
+   * FINAL_TOOL_BUDGET_SHARE of it on.
+   */
+  maxInputTokens?: number;
 }
 
 /** How many trailing steps get the forced finalTool (room for one rejection + fix). */
 const FINAL_TOOL_FORCED_STEPS = 3;
+/** Share of maxInputTokens after which finalTool is forced (the rest is room for one rejection + fix). */
+const FINAL_TOOL_BUDGET_SHARE = 0.8;
+
+function inputTokensSpent(steps: ReadonlyArray<{ usage: { inputTokens?: number | undefined } }>): number {
+  return steps.reduce((sum, step) => sum + (step.usage.inputTokens ?? 0), 0);
+}
 
 export interface ObjectCallOptions<T> {
   model: LanguageModel;
@@ -93,13 +106,17 @@ export function createLlmClient(): LlmClient {
         prompt: opts.prompt,
         tools: opts.tools,
         toolChoice: 'auto',
-        stopWhen: stepCountIs(opts.maxSteps),
+        stopWhen:
+          opts.maxInputTokens !== undefined
+            ? [stepCountIs(opts.maxSteps), ({ steps }) => inputTokensSpent(steps) >= (opts.maxInputTokens as number)]
+            : stepCountIs(opts.maxSteps),
         abortSignal: withTimeout(opts.signal, AGENT_LOOP_TIMEOUT_MS),
         ...(opts.onStepFinish ? { onStepFinish: opts.onStepFinish } : {}),
         ...(opts.finalTool !== undefined
           ? {
-              prepareStep: ({ stepNumber }: { stepNumber: number }) =>
-                stepNumber >= opts.maxSteps - FINAL_TOOL_FORCED_STEPS
+              prepareStep: ({ stepNumber, steps }: { stepNumber: number; steps: ReadonlyArray<{ usage: { inputTokens?: number | undefined } }> }) =>
+                stepNumber >= opts.maxSteps - FINAL_TOOL_FORCED_STEPS ||
+                (opts.maxInputTokens !== undefined && inputTokensSpent(steps) >= opts.maxInputTokens * FINAL_TOOL_BUDGET_SHARE)
                   ? { toolChoice: { type: 'tool' as const, toolName: opts.finalTool as string } }
                   : undefined,
             }

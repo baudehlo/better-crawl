@@ -63,6 +63,7 @@ export async function runGeneration(
     emitEvent: (e) => ctl.emit(e),
     signal: ctl.signal,
     maxSteps: opts.maxScoutSteps ?? 40,
+    ...(opts.maxScoutInputTokens !== undefined ? { maxInputTokens: opts.maxScoutInputTokens } : {}),
     limits,
     ignoreRobots: opts.ignoreRobots ?? false,
     userAgent,
@@ -164,7 +165,7 @@ export async function runGeneration(
       ...(opts.retry !== undefined ? { retry: opts.retry } : {}),
       ...(opts.browser !== undefined ? { browser: opts.browser } : {}),
       phase: 'selftest',
-    });
+    }, opts.codeChecks);
     if (result.report) reports.push(result.report);
 
     if (result.passed && result.report) {

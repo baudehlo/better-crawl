@@ -94,6 +94,23 @@ describe('createLlmClient().runAgentLoop finalTool', () => {
     expect(call.prepareStep({ stepNumber: 39 })).toEqual({ toolChoice: { type: 'tool', toolName: 'report_findings' } });
   });
 
+  it('with an input-token budget: stops when it is spent and forces the named tool from 80% of it', async () => {
+    generateText.mockResolvedValue({ finishReason: 'stop', totalUsage: {}, steps: [] });
+    const client = createLlmClient();
+    await client.runAgentLoop({ model: MODEL, system: 's', prompt: 'p', tools: {}, maxSteps: 60, finalTool: 'report_findings', maxInputTokens: 300_000 });
+    const call = generateText.mock.calls[0]?.[0] as {
+      stopWhen: [unknown, (ctx: { steps: Array<{ usage: { inputTokens?: number } }> }) => boolean];
+      prepareStep: (ctx: { stepNumber: number; steps: Array<{ usage: { inputTokens?: number } }> }) => unknown;
+    };
+    const steps = (...tokens: number[]) => tokens.map((inputTokens) => ({ usage: { inputTokens } }));
+    expect(call.stopWhen[0]).toEqual({ __stopWhen: 60 });
+    expect(call.stopWhen[1]({ steps: steps(100_000, 150_000) })).toBe(false);
+    expect(call.stopWhen[1]({ steps: steps(100_000, 150_000, 50_000) })).toBe(true);
+    expect(call.prepareStep({ stepNumber: 2, steps: steps(100_000, 139_999) })).toBeUndefined();
+    expect(call.prepareStep({ stepNumber: 2, steps: steps(100_000, 140_000) })).toEqual({ toolChoice: { type: 'tool', toolName: 'report_findings' } });
+    expect(call.prepareStep({ stepNumber: 57, steps: steps(1_000) })).toEqual({ toolChoice: { type: 'tool', toolName: 'report_findings' } });
+  });
+
   it('omits prepareStep when no finalTool is set', async () => {
     generateText.mockResolvedValue({ finishReason: 'stop', totalUsage: {}, steps: [] });
     const client = createLlmClient();

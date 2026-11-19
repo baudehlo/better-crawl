@@ -55,6 +55,8 @@ describe('codegen prompts', () => {
       const prompt = buildCodegenSystemPrompt(engine);
       expect(prompt).toContain('NEVER hardcode a year');
       expect(prompt).toContain('new Date().getFullYear()');
+      expect(prompt).toContain('If the task instructions give their own rule for dates without a year');
+      expect(prompt).toContain("NEVER copy the site's data into the code");
       expect(prompt).toContain('the year the crawl is running');
     }
   });

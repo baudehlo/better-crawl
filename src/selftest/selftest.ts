@@ -20,8 +20,9 @@ export interface SelfTestResult {
 export async function runSelfTest(
   artifact: Artifact,
   opts: ExecuteOptions,
+  codeChecks?: (code: string) => string[],
 ): Promise<SelfTestResult> {
-  const lintErrors = lintArtifact(artifact);
+  const lintErrors = lintArtifact(artifact, codeChecks);
   if (lintErrors.length > 0) {
     return { passed: false, lintErrors };
   }

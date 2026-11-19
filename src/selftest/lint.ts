@@ -4,8 +4,8 @@ import type { Artifact } from '../artifact.js';
  * Cheap static checks on generated code so obviously-broken candidates never
  * burn a live crawl. Not a parser — pragmatic regexes over known ctx idioms.
  */
-export function lintArtifact(artifact: Artifact): string[] {
-  const errors: string[] = [];
+export function lintArtifact(artifact: Artifact, codeChecks?: (code: string) => string[]): string[] {
+  const errors: string[] = [...(codeChecks?.(artifact.code) ?? [])];
   const { code } = artifact;
   const selectorNames = new Set(Object.keys(artifact.manifest.selectors));
 

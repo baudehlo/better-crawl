@@ -190,6 +190,39 @@ describe.skipIf(!hasBrowser)('generateCrawler pipeline (FakeLlm)', () => {
     expect(repairTurn).toMatch(/invalid|Assertion FAILED/);
   });
 
+  it('feeds the host\'s codeChecks into the repair turn, and gives the scout its input-token budget', async () => {
+    const fake = new FakeLlm({
+      driveAgent: (loop) => driveStaticStoreScout(loop.tools, store.url),
+      objects: [
+        codegenOutput(`const FALLBACK_DATES = ['2026-07-06', '2026-07-13'];\n${WORKING_CODE}`),
+        codegenOutput(WORKING_CODE),
+      ],
+    });
+    const checked: string[] = [];
+    const handle = generateCrawler({
+      url: `${store.url}/`,
+      instructions: 'Extract every product',
+      schemas: { product: productSchema },
+      model: FAKE_MODEL,
+      llmClient: fake,
+      limits: { delayMs: 0 },
+      maxScoutInputTokens: 300_000,
+      codeChecks: (code) => {
+        checked.push(code);
+        return code.includes('FALLBACK_DATES') ? ['the code writes dates into string literals'] : [];
+      },
+    });
+
+    const { artifact, report } = await handle;
+    expect(report.ok).toBe(true);
+    expect(artifact.manifest.stats.attempts).toBe(2);
+    expect(checked).toHaveLength(2);
+    expect(fake.agentCalls[0]?.maxInputTokens).toBe(300_000);
+    const repairTurn = String(fake.objectCalls[1]?.messages.at(-1)?.content);
+    expect(repairTurn).toContain('Static lint errors');
+    expect(repairTurn).toContain('the code writes dates into string literals');
+  });
+
   it('retries a malformed codegen response and merges scout inputs/assertions', async () => {
     const driveWithInputs = async (tools: ToolSet): Promise<void> => {
       const call = async (name: string, input: unknown): Promise<string> => {
