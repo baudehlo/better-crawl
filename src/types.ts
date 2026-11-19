@@ -116,8 +116,8 @@ export interface GenerateOptions extends CommonOptions {
   maxScoutSteps?: number;
   /**
    * Scout input-token budget, summed over its steps (each step re-sends the
-   * whole conversation). report_findings is forced from 80% of it on and the
-   * scout stops when it is spent. Default: no budget (steps only).
+   * whole conversation). report_findings is forced once only about three more
+   * steps fit, and the scout stops when it is spent. Default: no budget (steps only).
    */
   maxScoutInputTokens?: number;
   /** Self-test repair attempts (after the first try) before giving up. Default 3. */

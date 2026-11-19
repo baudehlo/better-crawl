@@ -94,7 +94,7 @@ describe('createLlmClient().runAgentLoop finalTool', () => {
     expect(call.prepareStep({ stepNumber: 39 })).toEqual({ toolChoice: { type: 'tool', toolName: 'report_findings' } });
   });
 
-  it('with an input-token budget: stops when it is spent and forces the named tool from 80% of it', async () => {
+  it('with an input-token budget: stops when it is spent and forces the named tool while three more steps still fit', async () => {
     generateText.mockResolvedValue({ finishReason: 'stop', totalUsage: {}, steps: [] });
     const client = createLlmClient();
     await client.runAgentLoop({ model: MODEL, system: 's', prompt: 'p', tools: {}, maxSteps: 60, finalTool: 'report_findings', maxInputTokens: 300_000 });
@@ -106,7 +106,11 @@ describe('createLlmClient().runAgentLoop finalTool', () => {
     expect(call.stopWhen[0]).toEqual({ __stopWhen: 60 });
     expect(call.stopWhen[1]({ steps: steps(100_000, 150_000) })).toBe(false);
     expect(call.stopWhen[1]({ steps: steps(100_000, 150_000, 50_000) })).toBe(true);
-    expect(call.prepareStep({ stepNumber: 2, steps: steps(100_000, 139_999) })).toBeUndefined();
+    // 3 steps of 20k still fit after 100k + 20k = 120k of 300k; with 40k steps (100k + 40k + 3 × 40k = 260k) too.
+    expect(call.prepareStep({ stepNumber: 2, steps: steps(100_000, 20_000) })).toBeUndefined();
+    expect(call.prepareStep({ stepNumber: 2, steps: steps(100_000, 40_000) })).toBeUndefined();
+    // 50k steps: 50k × 3 spent + 3 more = 300k: forced now, with room for a rejection and its fix.
+    expect(call.prepareStep({ stepNumber: 3, steps: steps(50_000, 50_000, 50_000) })).toEqual({ toolChoice: { type: 'tool', toolName: 'report_findings' } });
     expect(call.prepareStep({ stepNumber: 2, steps: steps(100_000, 140_000) })).toEqual({ toolChoice: { type: 'tool', toolName: 'report_findings' } });
     expect(call.prepareStep({ stepNumber: 57, steps: steps(1_000) })).toEqual({ toolChoice: { type: 'tool', toolName: 'report_findings' } });
   });

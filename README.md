@@ -142,7 +142,7 @@ Note that generation performs up to `1 + maxRepairAttempts` real crawls of the t
 
 ## Cost and code checks
 
-- `maxScoutInputTokens` caps the scout's input tokens, summed over its steps (every step re-sends the whole conversation, so input grows with steps × pages read). From 80% of it the scout is forced to report its findings; when it is spent the loop stops. Without it only `maxScoutSteps` limits the scout.
+- `maxScoutInputTokens` caps the scout's input tokens, summed over its steps (every step re-sends the whole conversation, so input grows with steps × pages read). Once only about three more steps fit in it, the scout is forced to report its findings (room for a rejection and its fix); when it is spent the loop stops. Without it only `maxScoutSteps` limits the scout.
 - `codeChecks: (code) => string[]` adds your own static checks to the library's lint, for generation and heal: every string returned is a failure that the repair turn is asked to fix, before any live self-test run.
 
 ## Network options

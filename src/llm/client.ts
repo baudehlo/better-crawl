@@ -32,19 +32,27 @@ export interface AgentLoopOptions {
   /**
    * Input-token budget for the whole loop (summed over steps; every step
    * re-sends the conversation, so this grows with steps × pages read). The
-   * loop stops once it is spent, and finalTool is forced from
-   * FINAL_TOOL_BUDGET_SHARE of it on.
+   * loop stops once it is spent, and finalTool is forced once it has room for
+   * only a few more steps (budgetNearlySpent).
    */
   maxInputTokens?: number;
 }
 
 /** How many trailing steps get the forced finalTool (room for one rejection + fix). */
 const FINAL_TOOL_FORCED_STEPS = 3;
-/** Share of maxInputTokens after which finalTool is forced (the rest is room for one rejection + fix). */
-const FINAL_TOOL_BUDGET_SHARE = 0.8;
 
 function inputTokensSpent(steps: ReadonlyArray<{ usage: { inputTokens?: number | undefined } }>): number {
   return steps.reduce((sum, step) => sum + (step.usage.inputTokens ?? 0), 0);
+}
+
+/**
+ * finalTool is forced once the budget has room for only FINAL_TOOL_FORCED_STEPS more steps the size of the
+ * last one (every step re-sends the conversation, so the next is at least as big): the report, a rejection
+ * and its fix. A fixed share of the budget left one step for a scout whose steps were 50k tokens each.
+ */
+function budgetNearlySpent(steps: ReadonlyArray<{ usage: { inputTokens?: number | undefined } }>, maxInputTokens: number): boolean {
+  const lastStep = steps.at(-1)?.usage.inputTokens ?? 0;
+  return inputTokensSpent(steps) + FINAL_TOOL_FORCED_STEPS * lastStep >= maxInputTokens;
 }
 
 export interface ObjectCallOptions<T> {
@@ -116,7 +124,7 @@ export function createLlmClient(): LlmClient {
           ? {
               prepareStep: ({ stepNumber, steps }: { stepNumber: number; steps: ReadonlyArray<{ usage: { inputTokens?: number | undefined } }> }) =>
                 stepNumber >= opts.maxSteps - FINAL_TOOL_FORCED_STEPS ||
-                (opts.maxInputTokens !== undefined && inputTokensSpent(steps) >= opts.maxInputTokens * FINAL_TOOL_BUDGET_SHARE)
+                (opts.maxInputTokens !== undefined && budgetNearlySpent(steps, opts.maxInputTokens))
                   ? { toolChoice: { type: 'tool' as const, toolName: opts.finalTool as string } }
                   : undefined,
             }
