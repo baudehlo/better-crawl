@@ -189,7 +189,7 @@ Handles returned by `generateCrawler`/`runCrawler` are promises, async-iterables
 
 ## How generation works
 
-1. **Scout.** An agent loop drives a real browser: condensed page reads (links + text, never raw HTML or the accessibility tree), selector verification, automatic listing-pattern detection, pagination exhaustion, and a no-JS probe that decides cheerio vs playwright. Its exit tool is gated. Reports with unverified selectors, invalid sample items, or an unproven cheerio claim get rejected with instructions, and the model corrects itself in-run.
+1. **Scout.** An agent loop drives a real browser: condensed page reads (links + text, never raw HTML or the accessibility tree), selector verification, automatic listing-pattern detection, pagination exhaustion, and a no-JS probe that decides cheerio vs playwright. When the browser cannot load a page (an auth challenge, an error, a blank page) that a plain fetch can, the scout goes cheerio-only: it reads and checks selectors on the raw HTML and must report the cheerio engine. Its exit tool is gated. Reports with unverified selectors, invalid sample items, or an unproven cheerio claim get rejected with instructions, and the model corrects itself in-run.
 2. **Codegen.** One structured-output call produces the code and manifest. The library overrides anything it verified itself: the engine choice, selector samples, and assertion floors.
 3. **Self-test.** Static lint first, so obviously broken code never touches the site, then a full live run with every item validated per-schema and assertions checked (`minItems`, field coverage, URLs reached). Failures are compacted into a digest and sent back for repair, three attempts by default. You only ever receive an artifact that has passed.
 

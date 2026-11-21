@@ -40,6 +40,12 @@ describe('checkFindings gates', () => {
     expect(checkFindings(payload(), evidence())).toBeNull();
   });
 
+  it('rejects engine playwright when the browser cannot load the site', () => {
+    expect(checkFindings(payload(), evidence({ browserProblem: 'HTTP 401' }))).toMatch(
+      /REJECTED: engine "playwright".*\(HTTP 401\).*Report engine "cheerio"/,
+    );
+  });
+
   it('rejects selectors that were never verified', () => {
     const result = checkFindings(payload(), evidence({ verifiedSelectors: new Map() }));
     expect(result).toMatch(/REJECTED: selector "itemRow".*never verified/);

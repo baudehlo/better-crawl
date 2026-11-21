@@ -12,6 +12,8 @@ export interface GateEvidence {
   /** Condensed text of every successful probe_no_js call. */
   probeTexts: string[];
   validator: ItemValidator;
+  /** Set when the browser could not load the site but a plain fetch could (cheerio-only). */
+  browserProblem?: string;
 }
 
 /**
@@ -26,6 +28,13 @@ export function checkFindings(
   payload: ReportFindingsPayload,
   evidence: GateEvidence,
 ): string | null {
+  if (evidence.browserProblem !== undefined && payload.engine === 'playwright') {
+    return (
+      `REJECTED: engine "playwright" cannot work here — the browser cannot load this site ` +
+      `(${evidence.browserProblem}), while the raw HTML has the pages. Report engine "cheerio".`
+    );
+  }
+
   for (const [name, def] of Object.entries(payload.selectors)) {
     const verification = evidence.verifiedSelectors.get(def.css);
     if (!verification) {

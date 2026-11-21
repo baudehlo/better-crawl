@@ -139,7 +139,8 @@ interface DomNode {
   children?: DomNode[];
 }
 
-function blockAwareText(_$: cheerio.CheerioAPI, node: unknown): string {
+/** Text of a cheerio node laid out like condensed TEXT: blocks on their own lines, table cells split by " | ". */
+export function blockAwareText(_$: cheerio.CheerioAPI, node: unknown): string {
   if (!node) return '';
   let out = '';
   const walk = (current: DomNode): void => {

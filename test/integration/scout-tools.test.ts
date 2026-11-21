@@ -9,6 +9,7 @@ import { Net } from '../../src/runtime/net.js';
 import { RobotsCache } from '../../src/runtime/robots.js';
 import { createValidator } from '../../src/runtime/validate.js';
 import { createScoutTools, ScoutState, type ScoutToolOptions } from '../../src/scout/tools.js';
+import { startBrowserBlockedSite } from '../fixtures/sites/browser-blocked.js';
 import { startPaginated, PAGINATED_TOTAL_ITEMS } from '../fixtures/sites/paginated.js';
 import { startLoginSite } from '../fixtures/sites/login-site.js';
 import { startStaticStore } from '../fixtures/sites/static-store.js';
@@ -41,6 +42,7 @@ describe.skipIf(!hasBrowser)('scout tools', () => {
   let store: FixtureSite;
   let login: FixtureSite;
   let paginated: FixtureSite;
+  let blocked: FixtureSite;
 
   beforeAll(async () => {
     const pw = await import('playwright');
@@ -49,12 +51,14 @@ describe.skipIf(!hasBrowser)('scout tools', () => {
     store = await startStaticStore();
     login = await startLoginSite();
     paginated = await startPaginated();
+    blocked = await startBrowserBlockedSite();
   });
   afterAll(async () => {
     await browser?.close();
     await store?.close();
     await login?.close();
     await paginated?.close();
+    await blocked?.close();
   });
 
   function rig(overrides: Partial<ScoutToolOptions> = {}): ToolRig {
@@ -126,6 +130,106 @@ describe.skipIf(!hasBrowser)('scout tools', () => {
     const { call } = rig({ robots: undefined as never });
     const out = await call('navigate', { url: 'http://127.0.0.1:1/' });
     expect(out).toMatch(/^ERROR: /);
+  });
+
+  // A page of its own: a failed navigation can commit an error page late and
+  // interrupt the next test's navigation on a shared page.
+  const ownPage = async () => (await browser.newContext({ userAgent: UA })).newPage();
+
+  it('a page the browser cannot load but a plain fetch can makes the scout cheerio-only', async () => {
+    const { state, call } = rig({ page: await ownPage() });
+    const nav = await call('navigate', { url: `${blocked.url}/` });
+    expect(nav).toContain('NOTE: the browser could not load this page (HTTP 401)');
+    expect(nav).toContain('This site is cheerio-only');
+    expect(nav).toContain('2 Weeks Session B');
+    expect(state.cheerioOnly?.reason).toBe('HTTP 401');
+    expect(state.urlsVisited).toEqual([`${blocked.url}/`]);
+    expect(state.probeTexts).toHaveLength(1);
+
+    // Selectors are checked on the raw HTML, not on the browser's 401 page.
+    const rows = JSON.parse(await call('try_selector', { selector: 'table.sessions tr.session' })) as {
+      count: number;
+      samples: Array<{ text: string; href?: string }>;
+    };
+    expect(rows.count).toBe(4);
+    expect(rows.samples[0]).toEqual({ text: '3.5 Weeks | $5,360 +HST', href: `${blocked.url}/register` });
+    expect(await call('try_selector', { selector: '<<<not-css>>>' })).toMatch(/^ERROR: /);
+    expect(await call('read_page')).toContain('Dates and Rates');
+
+    for (const [name, input] of [
+      ['click', { selector: 'a', description: 'open' }],
+      ['type_text', { selector: 'input', text: 'x' }],
+      ['load_all', { selector: 'tr' }],
+      ['detect_listing', {}],
+    ] as const) {
+      expect(await call(name, input)).toBe(
+        `ERROR: ${name} needs the browser, which cannot load this site (HTTP 401). ` +
+          'The site is cheerio-only: navigate to link URLs and use try_selector on the raw HTML.',
+      );
+    }
+
+    // Later pages come straight from the plain fetch, and become the current page.
+    const contact = await call('navigate', { url: `${blocked.url}/contact` });
+    expect(contact).toContain('HTTP 200 (raw HTML, no JavaScript)');
+    expect(contact).toContain('MacTier, ON P0C 1H0');
+    expect(JSON.parse(await call('try_selector', { selector: 'p.summer' })).count).toBe(1);
+    await call('probe_no_js', { url: `${blocked.url}/` });
+    expect(JSON.parse(await call('try_selector', { selector: 'td.price' })).count).toBe(4);
+    expect(state.urlsVisited).toEqual([`${blocked.url}/`, `${blocked.url}/contact`]);
+  });
+
+  it('report_findings on a cheerio-only site verifies on the raw HTML and refuses engine playwright', async () => {
+    const { state, call } = rig({ page: await ownPage() });
+    await call('navigate', { url: `${blocked.url}/` });
+    const report = (engine: 'cheerio' | 'playwright') =>
+      call('report_findings', {
+        engine,
+        engineReason: 'the data is in the raw HTML',
+        selectors: {
+          sessionRow: { css: 'tr.session', description: 'one row per session', expect: 'many' },
+          sessionName: { css: 'td.name', description: 'session name', expect: 'many' },
+        },
+        inputsNeeded: [],
+        navigationPlan: ['fetch the dates page', 'read each row'],
+        expectedCounts: { product: 4 },
+        sampleItems: {
+          product: [
+            { name: '3.5 Weeks', price: 5360 },
+            { name: '2 Weeks Session A', price: 3650 },
+          ],
+        },
+      });
+    expect(await report('playwright')).toBe(
+      'REJECTED: engine "playwright" cannot work here — the browser cannot load this site ' +
+        '(HTTP 401), while the raw HTML has the pages. Report engine "cheerio".',
+    );
+    expect(await report('cheerio')).toContain('ACCEPTED');
+    expect(state.findings?.selectorSamples).toEqual({
+      sessionRow: '3.5 Weeks | $5,360 +HST',
+      sessionName: '3.5 Weeks',
+    });
+    expect(state.findings?.probeVerifiedCheerio).toBe(true);
+  });
+
+  it('a blank browser page or a dropped browser connection also falls back to the plain fetch', async () => {
+    const blank = rig({ page: await ownPage() });
+    expect(await blank.call('navigate', { url: `${blocked.url}/blank` })).toContain(
+      'NOTE: the browser could not load this page (a blank page)',
+    );
+    const dropped = rig({ page: await ownPage() });
+    expect(await dropped.call('navigate', { url: `${blocked.url}/drop` })).toMatch(
+      /^NOTE: the browser could not load this page \(page\.goto: net::ERR_EMPTY_RESPONSE/,
+    );
+    expect(dropped.state.cheerioOnly).toBeDefined();
+  });
+
+  it('stays on the browser when the plain fetch fails too', async () => {
+    const { state, call } = rig({ page: await ownPage() });
+    const out = await call('navigate', { url: `${store.url}/no-such-page` });
+    expect(out).toContain('=== TEXT ===');
+    expect(out).toContain('not found');
+    expect(out).not.toContain('NOTE');
+    expect(state.cheerioOnly).toBeUndefined();
   });
 
   it('read_page re-reads the current page', async () => {

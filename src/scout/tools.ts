@@ -1,8 +1,9 @@
 import { tool, type ToolSet } from 'ai';
+import * as cheerio from 'cheerio';
 import { z } from 'zod';
-import type { Page } from 'playwright';
+import type { Page, Response as PwResponse } from 'playwright';
 import type { CrawlEvent } from '../events.js';
-import { condenseHtml, condensePage, scrubSecrets } from '../llm/condense.js';
+import { blockAwareText, condenseHtml, condensePage, scrubSecrets } from '../llm/condense.js';
 import type { Net } from '../runtime/net.js';
 import type { RobotsCache } from '../runtime/robots.js';
 import type { ItemValidator } from '../runtime/validate.js';
@@ -40,6 +41,12 @@ export class ScoutState {
   readonly snapshots: Array<{ url: string; condensed: string }> = [];
   pagesVisited = 0;
   findings: ScoutFindings | undefined;
+  /**
+   * Set once the browser failed to load a page that a plain fetch (no
+   * JavaScript) could: the site is then cheerio-only, and the scout reads and
+   * checks selectors on the raw HTML of the last page fetched.
+   */
+  cheerioOnly: { reason: string; url: string; html: string } | undefined;
 
   recordSnapshot(url: string, condensed: string): void {
     const existing = this.snapshots.findIndex((s) => s.url === url);
@@ -52,6 +59,40 @@ export class ScoutState {
 /** Errors become tool-result strings so the agent loop keeps going. */
 function asToolError(err: unknown): string {
   return `ERROR: ${err instanceof Error ? err.message : String(err)}`;
+}
+
+/** Whether raw HTML shows any text without JavaScript (script and noscript content does not count). */
+function hasBodyText(html: string): boolean {
+  const $ = cheerio.load(html);
+  $('script, style, noscript, template').remove();
+  return $('body').text().trim().length > 0;
+}
+
+/** try_selector on raw HTML, with the same result shape as the browser version. */
+function selectInHtml(
+  html: string,
+  pageUrl: string,
+  css: string,
+): { count: number; samples: Array<{ text: string; href?: string }> } {
+  const $ = cheerio.load(html);
+  const matches = $(css);
+  const samples = matches
+    .slice(0, 3)
+    .toArray()
+    .map((el) => {
+      const node = $(el);
+      const text = blockAwareText($, el).replace(/\s+/g, ' ').replace(/^\| /, '').slice(0, 120);
+      const closest = node.closest('a');
+      const raw = (closest.length > 0 ? closest : node.find('a').first()).attr('href');
+      let href: string | undefined;
+      try {
+        href = raw ? new URL(raw, pageUrl).href : undefined;
+      } catch {
+        href = undefined;
+      }
+      return { text, ...(href ? { href } : {}) };
+    });
+  return { count: matches.length, samples };
 }
 
 export function createScoutTools(
@@ -122,12 +163,80 @@ export function createScoutTools(
   };
 
   const readCurrentPage = async (): Promise<string> => {
+    if (state.cheerioOnly) {
+      return scrub(condenseHtml(state.cheerioOnly.html, state.cheerioOnly.url));
+    }
     const condensed = scrub(await condensePage(page));
     state.recordSnapshot(page.url(), condensed);
     return condensed;
   };
 
-  const verifySelector = async (
+  /** Plain fetch (no JavaScript) of a page; the probe text is evidence for engine "cheerio". */
+  const fetchRaw = async (url: string) => {
+    const res = await opts.net.fetch(url, { signal: opts.signal });
+    const html = await res.text();
+    const finalUrl = res.url || url;
+    const condensed = scrub(condenseHtml(html, finalUrl));
+    return { status: res.status, ok: res.ok, html, url: finalUrl, condensed };
+  };
+
+  /** Makes a raw page the current page of a cheerio-only scout. */
+  const useRawPage = (raw: { url: string; html: string; condensed: string }, reason: string) => {
+    state.cheerioOnly = { reason, url: raw.url, html: raw.html };
+    state.probeTexts.push(raw.condensed);
+    state.recordSnapshot(raw.url, raw.condensed);
+  };
+
+  /** Why the browser did not really load the page, or null when it did. */
+  const browserLoadProblem = async (response: PwResponse | null): Promise<string | null> => {
+    if (response && response.status() >= 400) return `HTTP ${response.status()}`;
+    const isBlank = () =>
+      page
+        .evaluate(
+          /* v8 ignore start -- runs inside Chromium, invisible to Node coverage */
+          () => !document.body || (document.body.innerText.trim() === '' && document.links.length === 0),
+          /* v8 ignore stop */
+        )
+        .catch(() => false);
+    if (!(await isBlank())) return null;
+    // A script-rendered page can still be empty at domcontentloaded.
+    await page.waitForLoadState('load', { timeout: 5_000 }).catch(() => undefined);
+    return (await isBlank()) ? 'a blank page' : null;
+  };
+
+  /**
+   * The browser failed to load url. If a plain fetch gets the page, switch the
+   * scout to cheerio-only and return the raw page with a notice saying so;
+   * otherwise null.
+   */
+  const noJsFallback = async (url: string, problem: string): Promise<string | null> => {
+    const raw = await fetchRaw(url).catch(() => null);
+    throwIfAborted();
+    if (!raw?.ok || !hasBodyText(raw.html)) return null;
+    useRawPage(raw, problem);
+    state.urlsVisited.push(raw.url);
+    return (
+      `NOTE: the browser could not load this page (${problem}), but a plain HTTP fetch ` +
+      `without JavaScript did (HTTP ${raw.status}). This site is cheerio-only for the rest ` +
+      `of the exploration:\n` +
+      `- navigate and probe_no_js return the raw HTML, and that page becomes the current page.\n` +
+      `- try_selector and report_findings check selectors against this raw HTML, as the ` +
+      `cheerio engine will.\n` +
+      `- click, type_text, load_all and detect_listing need the browser and are unavailable; ` +
+      `follow links with navigate.\n` +
+      `- Report engine "cheerio".\n\n${raw.condensed}`
+    );
+  };
+
+  /** Tools that need a live browser page refuse to run on a cheerio-only site. */
+  const browserOnly = (name: string): string | null =>
+    state.cheerioOnly
+      ? `ERROR: ${name} needs the browser, which cannot load this site ` +
+        `(${state.cheerioOnly.reason}). The site is cheerio-only: navigate to link URLs and ` +
+        `use try_selector on the raw HTML.`
+      : null;
+
+  const selectInBrowser = async (
     css: string,
   ): Promise<{ count: number; samples: Array<{ text: string; href?: string }> }> => {
     const locator = page.locator(css);
@@ -148,6 +257,15 @@ export function createScoutTools(
         .catch(() => null);
       samples.push({ text, ...(href ? { href } : {}) });
     }
+    return { count, samples };
+  };
+
+  const verifySelector = async (
+    css: string,
+  ): Promise<{ count: number; samples: Array<{ text: string; href?: string }> }> => {
+    const { count, samples } = state.cheerioOnly
+      ? selectInHtml(state.cheerioOnly.html, state.cheerioOnly.url, css)
+      : await selectInBrowser(css);
     const evidence: SelectorEvidence = {
       count,
       ...(samples[0]?.text ? { sampleText: samples[0].text } : {}),
@@ -165,7 +283,27 @@ export function createScoutTools(
         try {
           const blocked = await gate(url);
           if (blocked) return blocked;
-          await page.goto(url, { waitUntil: 'domcontentloaded' });
+          if (state.cheerioOnly) {
+            const raw = await fetchRaw(url);
+            useRawPage(raw, state.cheerioOnly.reason);
+            state.urlsVisited.push(raw.url);
+            return `HTTP ${raw.status} (raw HTML, no JavaScript)\n${raw.condensed}`;
+          }
+          let response: PwResponse | null;
+          try {
+            response = await page.goto(url, { waitUntil: 'domcontentloaded' });
+          } catch (err) {
+            throwIfAborted();
+            const gotoError = err instanceof Error ? (err.message.split('\n')[0] ?? err.message) : String(err);
+            const fallback = await noJsFallback(url, gotoError);
+            if (fallback) return fallback;
+            throw err;
+          }
+          const problem = await browserLoadProblem(response);
+          if (problem) {
+            const fallback = await noJsFallback(url, problem);
+            if (fallback) return fallback;
+          }
           state.urlsVisited.push(page.url());
           await captureScreenshot('navigate');
           return await readCurrentPage();
@@ -199,6 +337,8 @@ export function createScoutTools(
       execute: async ({ selector }) => {
         try {
           throwIfAborted();
+          const refused = browserOnly('click');
+          if (refused) return refused;
           const locator = page.locator(selector);
           if ((await locator.count()) === 0) {
             return `ERROR: selector matched 0 elements: ${selector}`;
@@ -233,6 +373,8 @@ export function createScoutTools(
       execute: async ({ selector, inputName, text }) => {
         try {
           throwIfAborted();
+          const refused = browserOnly('type_text');
+          if (refused) return refused;
           let value: string;
           if (inputName !== undefined) {
             const supplied = opts.inputs[inputName];
@@ -285,6 +427,8 @@ export function createScoutTools(
       execute: async () => {
         try {
           throwIfAborted();
+          const refused = browserOnly('detect_listing');
+          if (refused) return refused;
           const result = await page.evaluate(
             /* v8 ignore start -- runs inside Chromium, invisible to Node coverage; asserted via integration tests */
             () => {
@@ -351,6 +495,8 @@ export function createScoutTools(
       inputSchema: z.object({ selector: z.string() }),
       execute: async ({ selector }) => {
         try {
+          const refused = browserOnly('load_all');
+          if (refused) return refused;
           const finalCount = await loadAll(page, selector, {}, throwIfAborted, sleep);
           await verifySelector(selector);
           return `final count for ${selector}: ${finalCount}`;
@@ -371,11 +517,14 @@ export function createScoutTools(
         try {
           const blocked = await gate(url);
           if (blocked) return blocked;
-          const res = await opts.net.fetch(url, { signal: opts.signal });
-          const condensed = scrub(condenseHtml(await res.text(), res.url || url));
-          state.probeTexts.push(condensed);
-          state.recordSnapshot(`probe:${url}`, condensed);
-          return `HTTP ${res.status} (no-JS probe)\n${condensed}`;
+          const raw = await fetchRaw(url);
+          if (state.cheerioOnly) {
+            useRawPage(raw, state.cheerioOnly.reason);
+          } else {
+            state.probeTexts.push(raw.condensed);
+            state.recordSnapshot(`probe:${url}`, raw.condensed);
+          }
+          return `HTTP ${raw.status} (no-JS probe)\n${raw.condensed}`;
         } catch (err) {
           throwIfAborted();
           return asToolError(err);
@@ -412,6 +561,7 @@ export function createScoutTools(
             verifiedSelectors: state.verifiedSelectors,
             probeTexts: state.probeTexts,
             validator: opts.validator,
+            ...(state.cheerioOnly ? { browserProblem: state.cheerioOnly.reason } : {}),
           });
           if (rejection) return rejection;
 
