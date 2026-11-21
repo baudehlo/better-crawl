@@ -205,6 +205,19 @@ describe('browser option builders', () => {
     });
   });
 
+  it('buildLaunchOptions lifts credentials embedded in the proxy URL into username/password', () => {
+    // Playwright drops userinfo from proxy.server, so the browser would get a 407.
+    expect(buildLaunchOptions(true, undefined, { server: 'http://us%40r:p%3Ass@proxy:7777' }).proxy).toEqual({
+      server: 'http://proxy:7777',
+      username: 'us@r',
+      password: 'p:ss',
+    });
+    expect(
+      buildLaunchOptions(true, undefined, { server: 'http://a:b@proxy:7777', username: 'u', password: 'p' }).proxy,
+    ).toEqual({ server: 'http://proxy:7777', username: 'u', password: 'p' });
+    expect(buildLaunchOptions(true, undefined, { server: 'proxy:8080' }).proxy).toEqual({ server: 'proxy:8080' });
+  });
+
   it('buildContextOptions forwards headers and TLS relaxation', () => {
     expect(buildContextOptions('ua')).toEqual({ userAgent: 'ua' });
     expect(

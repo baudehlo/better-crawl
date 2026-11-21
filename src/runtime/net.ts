@@ -282,6 +282,24 @@ function buildProxyAgent(proxy: ProxyOptions): ProxyAgent {
   });
 }
 
+/**
+ * Playwright keeps only protocol://host of proxy.server and authenticates with
+ * proxy.username/password alone, so credentials embedded in the URL (which
+ * undici's ProxyAgent honours for plain fetches) must be lifted out for the
+ * browser. Explicit username/password win.
+ */
+function browserProxy(proxy: ProxyOptions): { server: string; username?: string; password?: string } {
+  const url = URL.canParse(proxy.server) ? new URL(proxy.server) : undefined;
+  const embedded = url !== undefined && url.username !== '';
+  const username = proxy.username ?? (embedded ? decodeURIComponent(url.username) : undefined);
+  const password = proxy.password ?? (embedded ? decodeURIComponent(url.password) : undefined);
+  return {
+    server: embedded ? `${url.protocol}//${url.host}` : proxy.server,
+    ...(username !== undefined ? { username } : {}),
+    ...(password !== undefined ? { password } : {}),
+  };
+}
+
 /** chromium.launch() options for the shared browser knobs — pure, for tests. */
 export function buildLaunchOptions(
   headless: boolean,
@@ -297,15 +315,7 @@ export function buildLaunchOptions(
     headless,
     ...(browser?.executablePath !== undefined ? { executablePath: browser.executablePath } : {}),
     ...(browser?.args !== undefined ? { args: browser.args } : {}),
-    ...(proxy
-      ? {
-          proxy: {
-            server: proxy.server,
-            ...(proxy.username !== undefined ? { username: proxy.username } : {}),
-            ...(proxy.password !== undefined ? { password: proxy.password } : {}),
-          },
-        }
-      : {}),
+    ...(proxy ? { proxy: browserProxy(proxy) } : {}),
   };
 }
 

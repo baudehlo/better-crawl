@@ -152,7 +152,8 @@ Both `generateCrawler` and `runCrawler` accept the same networking knobs, applie
 ```ts
 {
   // Route all traffic through a proxy. ignoreTlsErrors accepts the certificates of
-  // TLS-intercepting proxies (e.g. Bright Data's residential network).
+  // TLS-intercepting proxies (e.g. Bright Data's residential network). Credentials
+  // may also sit in the URL ('http://u:p@host:8080'); the browser gets them too.
   proxy: { server: 'http://host:8080', username: 'u', password: 'p', ignoreTlsErrors: true },
 
   // Extra headers on every request (merged over the user-agent; browser requests

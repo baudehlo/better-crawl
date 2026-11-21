@@ -4,6 +4,7 @@ import type { LanguageModel, ToolSet } from 'ai';
 import type { CrawlEvent } from '../../src/events.js';
 import { runScout } from '../../src/scout/scout.js';
 import { FakeLlm } from '../helpers/fake-llm.js';
+import { startAuthProxy, type AuthProxy } from '../fixtures/sites/auth-proxy.js';
 import { startJsStore } from '../fixtures/sites/js-store.js';
 import { startStaticStore } from '../fixtures/sites/static-store.js';
 import type { FixtureSite } from '../fixtures/sites/server.js';
@@ -33,13 +34,64 @@ function makeCaller(tools: ToolSet) {
 describe.skipIf(!hasBrowser)('scout (FakeLlm-driven)', () => {
   let store: FixtureSite;
   let jsStore: FixtureSite;
+  let proxy: AuthProxy;
   beforeAll(async () => {
     store = await startStaticStore();
     jsStore = await startJsStore();
+    proxy = await startAuthProxy('scout', 's3cret');
   });
   afterAll(async () => {
     await store?.close();
     await jsStore?.close();
+    await proxy?.close();
+  });
+
+  it('the browser authenticates to a proxy whose URL carries the credentials', async () => {
+    // As in production (PLAYWRIGHT_PROXY_SERVER=http://user:pass@host:port): the plain
+    // fetch got through while the browser got the proxy's 407 and every selector matched 0.
+    const fake = new FakeLlm({
+      driveAgent: async (loop) => {
+        const call = makeCaller(loop.tools);
+        const nav = await call('navigate', { url: `${store.url}/` });
+        expect(nav).not.toContain('NOTE');
+        expect(nav).toContain('Widget 1');
+        expect(JSON.parse(await call('try_selector', { selector: 'li.product' })).count).toBe(6);
+        await call('probe_no_js', { url: `${store.url}/` });
+        const accepted = await call('report_findings', {
+          engine: 'cheerio',
+          engineReason: 'data in raw HTML',
+          selectors: { productRow: { css: 'li.product', description: 'rows', expect: 'many' } },
+          inputsNeeded: [],
+          navigationPlan: ['open listing'],
+          expectedCounts: { product: 6 },
+          sampleItems: {
+            product: [
+              { name: 'Widget 1', price: 10.99 },
+              { name: 'Widget 2', price: 20.99 },
+            ],
+          },
+        });
+        expect(accepted).toContain('ACCEPTED');
+      },
+    });
+    await runScout({
+      llm: fake,
+      model: FAKE_MODEL,
+      url: `${store.url}/`,
+      instructions: 'Find all products with prices',
+      schemas: { product: productSchema },
+      inputs: {},
+      emitEvent: () => undefined,
+      signal: new AbortController().signal,
+      maxSteps: 40,
+      limits: { maxPages: 20, delayMs: 0 },
+      ignoreRobots: true,
+      userAgent: 'better-crawl-test',
+      screenshots: false,
+      headless: true,
+      proxy: { server: proxy.url.replace('http://', 'http://scout:s3cret@') },
+    });
+    expect(proxy.log).toContain(`200 ${store.url}/`);
   });
 
   it('accepts a cheerio report on the static store after probe + verification, rejecting bad ones first', async () => {
